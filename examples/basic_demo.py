@@ -5,6 +5,8 @@ from typing import List
 import numpy as np
 from PIL import Image
 
+from fragmento_core.domain.compositor import build_timeslice
+
 
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
@@ -60,61 +62,6 @@ def center_crop_to_size(img: Image.Image, target_w: int, target_h: int) -> Image
     bottom = top + target_h
 
     return resized.crop((left, top, right, bottom))
-
-
-def build_timeslice(
-    images: List[np.ndarray],
-    orientation: str = "vertical",
-    num_slices: int | None = None,
-    reverse_time: bool = False,
-) -> np.ndarray:
-    if not images:
-        raise ValueError("No images loaded.")
-
-    h, w, c = images[0].shape
-    if c != 3:
-        raise ValueError("Expected RGB images.")
-
-    for img in images:
-        if img.shape != (h, w, c):
-            raise ValueError(
-                "All images must have the same dimensions after preprocessing."
-            )
-
-    if num_slices is None:
-        num_slices = len(images)
-
-    if num_slices < 1:
-        raise ValueError("num_slices must be at least 1.")
-
-    frame_indices = np.linspace(0, len(images) - 1, num_slices).round().astype(int)
-    if reverse_time:
-        frame_indices = frame_indices[::-1]
-
-    if orientation == "vertical":
-        output = np.zeros((h, w, 3), dtype=np.uint8)
-        x_edges = np.linspace(0, w, num_slices + 1).round().astype(int)
-
-        for i in range(num_slices):
-            x0, x1 = x_edges[i], x_edges[i + 1]
-            if x1 <= x0:
-                continue
-            output[:, x0:x1, :] = images[frame_indices[i]][:, x0:x1, :]
-
-    elif orientation == "horizontal":
-        output = np.zeros((h, w, 3), dtype=np.uint8)
-        y_edges = np.linspace(0, h, num_slices + 1).round().astype(int)
-
-        for i in range(num_slices):
-            y0, y1 = y_edges[i], y_edges[i + 1]
-            if y1 <= y0:
-                continue
-            output[y0:y1, :, :] = images[frame_indices[i]][y0:y1, :, :]
-
-    else:
-        raise ValueError("orientation must be 'vertical' or 'horizontal'.")
-
-    return output
 
 
 def main():
