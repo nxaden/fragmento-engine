@@ -111,26 +111,30 @@ spec = TimesliceSpec(
 
 response = render_folder(
     input_folder=Path("./frames"),
-    output_file=Path("./out/timeslice.jpg"),
     spec=spec,
     resize_mode="crop",
 )
 
 print(response.result.image.shape)
+print(response.output_file)
 ```
 
 ## CLI Usage
 
-A CLI interface can be provided on top of the engine so a folder of source frames can be rendered directly from the command line.
+A CLI interface can be provided on top of the engine so a folder of source
+frames can be rendered directly from the command line.
 
 ```sh
-fragmento ./frames ./out.jpg --orientation vertical --slices 20
+fragmento ./frames --orientation vertical --slices 20
 ```
+
+If no output path is provided, Fragmento writes a timestamped file into an
+`out/` folder next to the input folder.
 
 Example with slice effects:
 
 ```sh
-fragmento ./frames ./out.jpg \
+fragmento ./frames \
   --orientation vertical \
   --slices 20 \
   --border 2 \
@@ -140,6 +144,22 @@ fragmento ./frames ./out.jpg \
   --shadow-opacity 0.35 \
   --highlight 4 \
   --highlight-opacity 0.2 \
+  --feather 6 \
+  --curve smoothstep
+```
+
+Progression GIF example:
+
+```sh
+fragmento ./frames \
+  --progression-gif \
+  --gif-smooth-loop \
+  --gif-frame-duration-ms 180 \
+  --orientation vertical \
+  --border 4 \
+  --border-color-mode gradient \
+  --shadow 8 \
+  --highlight 4 \
   --feather 6 \
   --curve smoothstep
 ```

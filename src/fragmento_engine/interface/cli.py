@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from fragmento_engine import render_folder
+from fragmento_engine import render_folder, render_progression_gif
 from fragmento_engine import SliceEffects, TimesliceSpec
 
 
@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Create a time-slice image from a sequence of photos."
     )
     parser.add_argument("input_folder", type=Path)
-    parser.add_argument("output_file", type=Path)
+    parser.add_argument("output_file", type=Path, nargs="?", default=None)
     parser.add_argument(
         "--orientation",
         choices=["vertical", "horizontal"],
@@ -85,6 +85,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--resize-mode",
         choices=["crop", "resize"],
         default="crop",
+    )
+    parser.add_argument(
+        "--progression-gif",
+        action="store_true",
+        help=(
+            "Render an animated GIF with slice counts 1, 2, 4, and so on "
+            "until the sequence exceeds the number of input images."
+        ),
+    )
+    parser.add_argument(
+        "--gif-frame-duration-ms",
+        type=int,
+        default=250,
+        help="Per-frame duration in milliseconds for progression GIFs.",
+    )
+    parser.add_argument(
+        "--gif-smooth-loop",
+        action="store_true",
+        help=(
+            "Use a ping-pong GIF sequence that walks back down through the "
+            "slice counts before looping."
+        ),
     )
     parser.add_argument("--reverse-time", action="store_true")
     parser.add_argument(
@@ -175,15 +197,29 @@ def main() -> None:
         effects=_build_effects(args),
     )
 
-    response = render_folder(
-        input_folder=args.input_folder,
-        output_file=args.output_file,
-        spec=spec,
-        resize_mode=args.resize_mode,
-    )
+    if args.progression_gif:
+        response = render_progression_gif(
+            input_folder=args.input_folder,
+            output_file=args.output_file,
+            spec=spec,
+            resize_mode=args.resize_mode,
+            frame_duration_ms=args.gif_frame_duration_ms,
+            smooth_loop=args.gif_smooth_loop,
+        )
+    else:
+        response = render_folder(
+            input_folder=args.input_folder,
+            output_file=args.output_file,
+            spec=spec,
+            resize_mode=args.resize_mode,
+        )
 
     print(f"Rendered using {len(response.input_paths)} images.")
-    print(f"Saved: {args.output_file}")
+    if response.slice_counts is not None:
+        counts = ", ".join(str(count) for count in response.slice_counts)
+        print(f"Slice counts: {counts}")
+    if response.output_file is not None:
+        print(f"Saved: {response.output_file}")
 
 
 if __name__ == "__main__":

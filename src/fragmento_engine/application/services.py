@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol, Sequence
 
 from fragmento_engine.domain.compositor import build_timeslice
-from fragmento_engine.domain.models import CompositeResult, RGBImage, TimesliceSpec
+from fragmento_engine.domain.models import (
+    CompositeResult,
+    RGBImage,
+    TimesliceSpec,
+)
 from fragmento_engine.shared.types import ResizeMode
 
 
@@ -67,6 +73,25 @@ class ImageWriter(Protocol):
         """
         ...
 
+    def save_gif(
+        self,
+        images: Sequence[RGBImage],
+        output_file: Path,
+        *,
+        duration_ms: int = 250,
+    ) -> None:
+        """Persist multiple RGB images as an animated GIF.
+
+        Args:
+            images: Ordered RGB frames to encode.
+            output_file: Destination path for the animated GIF.
+            duration_ms: Per-frame duration in milliseconds.
+
+        Raises:
+            OSError: If the file cannot be written.
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class RenderRequest:
@@ -92,10 +117,82 @@ class RenderResponse:
     Attributes:
         result: The final composite result returned by the domain layer.
         input_paths: The ordered source image paths used during rendering.
+        output_file: Saved output location when the workflow persisted a file.
+        slice_counts: Rendered slice counts when an animated progression was
+            generated.
     """
 
     result: CompositeResult
     input_paths: list[Path]
+    output_file: Path | None = None
+    slice_counts: list[int] | None = None
+
+
+def _default_output_file(
+    input_folder: Path,
+    *,
+    suffix: str,
+    label: str,
+) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    token = secrets.token_hex(4)
+    filename = f"{stamp}-{token}-{label}{suffix}"
+    return input_folder.parent / "out" / filename
+
+
+def _resolve_output_file(
+    input_folder: Path,
+    output_file: Path | None,
+    *,
+    suffix: str,
+    label: str,
+    require_suffix: bool = False,
+) -> Path:
+    if output_file is None:
+        return _default_output_file(
+            input_folder,
+            suffix=suffix,
+            label=label,
+        )
+
+    if output_file.suffix == "":
+        return output_file.with_suffix(suffix)
+
+    if require_suffix and output_file.suffix.lower() != suffix:
+        raise ValueError(f"Output file must use the {suffix} extension.")
+
+    return output_file
+
+
+def _progression_slice_counts(
+    *,
+    num_images: int,
+    span: int,
+) -> list[int]:
+    if num_images < 1:
+        raise ValueError("num_images must be at least 1.")
+
+    counts: list[int] = []
+    count = 1
+
+    while count <= num_images and count <= span:
+        counts.append(count)
+        count *= 2
+
+    if count <= span:
+        counts.append(count)
+
+    if not counts:
+        counts.append(1)
+
+    return counts
+
+
+def _smooth_loop_slice_counts(slice_counts: Sequence[int]) -> list[int]:
+    counts = list(slice_counts)
+    if len(counts) < 3:
+        return counts
+    return counts + counts[-2:0:-1]
 
 
 class RenderTimesliceService:
@@ -125,6 +222,25 @@ class RenderTimesliceService:
         self._sequence_loader = sequence_loader
         self._image_writer = image_writer
 
+    def _load_paths_and_images(
+        self,
+        request: RenderRequest,
+    ) -> tuple[list[Path], list[RGBImage]]:
+        if not request.input_folder.exists():
+            raise ValueError(f"Input folder does not exist: {request.input_folder}")
+        if not request.input_folder.is_dir():
+            raise ValueError(f"Input path is not a directory: {request.input_folder}")
+
+        paths = self._sequence_loader.get_image_paths(request.input_folder)
+        if not paths:
+            raise ValueError("No supported image files found.")
+
+        images = self._sequence_loader.load_images(
+            paths,
+            resize_mode=request.resize_mode,
+        )
+        return paths, images
+
     def render(self, request: RenderRequest) -> RenderResponse:
         """Render a timeslice composite from the requested input folder.
 
@@ -141,19 +257,7 @@ class RenderTimesliceService:
                 or contains no supported image files.
             OSError: If image loading fails in the configured loader.
         """
-        if not request.input_folder.exists():
-            raise ValueError(f"Input folder does not exist: {request.input_folder}")
-        if not request.input_folder.is_dir():
-            raise ValueError(f"Input path is not a directory: {request.input_folder}")
-
-        paths = self._sequence_loader.get_image_paths(request.input_folder)
-        if not paths:
-            raise ValueError("No supported image files found.")
-
-        images = self._sequence_loader.load_images(
-            paths,
-            resize_mode=request.resize_mode,
-        )
+        paths, images = self._load_paths_and_images(request)
 
         result = build_timeslice(
             images=images,
@@ -168,7 +272,7 @@ class RenderTimesliceService:
     def render_to_file(
         self,
         request: RenderRequest,
-        output_file: Path,
+        output_file: Path | None = None,
     ) -> RenderResponse:
         """Render a timeslice composite and save the image to disk.
 
@@ -189,5 +293,71 @@ class RenderTimesliceService:
             raise ValueError("No image writer configured.")
 
         response = self.render(request)
-        self._image_writer.save(response.result.image, output_file)
-        return response
+        resolved_output = _resolve_output_file(
+            request.input_folder,
+            output_file,
+            suffix=".png",
+            label="timeslice",
+        )
+        self._image_writer.save(response.result.image, resolved_output)
+        return RenderResponse(
+            result=response.result,
+            input_paths=response.input_paths,
+            output_file=resolved_output,
+        )
+
+    def render_progression_gif_to_file(
+        self,
+        request: RenderRequest,
+        output_file: Path | None = None,
+        *,
+        duration_ms: int = 250,
+        smooth_loop: bool = False,
+    ) -> RenderResponse:
+        """Render a power-of-two slice progression and save it as an animated GIF."""
+        if self._image_writer is None:
+            raise ValueError("No image writer configured.")
+
+        paths, images = self._load_paths_and_images(request)
+        height, width, _ = images[0].shape
+        span = width if request.spec.orientation == "vertical" else height
+        base_slice_counts = _progression_slice_counts(
+            num_images=len(images),
+            span=span,
+        )
+        slice_counts = (
+            _smooth_loop_slice_counts(base_slice_counts)
+            if smooth_loop
+            else base_slice_counts
+        )
+
+        peak_results = [
+            build_timeslice(
+                images=images,
+                spec=replace(request.spec, num_slices=slice_count),
+            )
+            for slice_count in base_slice_counts
+        ]
+        results_by_count = {
+            slice_count: result
+            for slice_count, result in zip(base_slice_counts, peak_results)
+        }
+        frames = [results_by_count[slice_count].image for slice_count in slice_counts]
+        resolved_output = _resolve_output_file(
+            request.input_folder,
+            output_file,
+            suffix=".gif",
+            label="progression",
+            require_suffix=True,
+        )
+        self._image_writer.save_gif(
+            frames,
+            resolved_output,
+            duration_ms=duration_ms,
+        )
+        return RenderResponse(
+            result=peak_results[-1],
+            input_paths=paths,
+            output_file=resolved_output,
+            slice_counts=slice_counts,
+        )

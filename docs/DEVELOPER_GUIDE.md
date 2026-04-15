@@ -136,6 +136,8 @@ class RenderRequest:
 class RenderResponse:
     result: CompositeResult
     input_paths: list[Path]
+    output_file: Path | None = None
+    slice_counts: list[int] | None = None
 ```
 
 This keeps service APIs clean and easy to evolve.

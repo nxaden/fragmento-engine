@@ -6,7 +6,13 @@ Fragmento Engine exposes a small public API at the package root for the common
 library use case:
 
 ```python
-from fragmento_engine import SliceEffects, TimesliceSpec, render_folder, render_images
+from fragmento_engine import (
+    SliceEffects,
+    TimesliceSpec,
+    render_folder,
+    render_images,
+    render_progression_gif,
+)
 ```
 
 For advanced usage, lower-level modules are also available under
@@ -99,13 +105,14 @@ render_folder(
 ) -> RenderResponse
 ```
 
-Load an image sequence from a folder, render a timeslice, and optionally save
-the result to disk.
+Load an image sequence from a folder, render a timeslice, and save the result
+to disk.
 
 Parameters:
 
 - `input_folder`: Directory containing the source images.
-- `output_file`: Optional destination path for the rendered image.
+- `output_file`: Optional destination path for the rendered image. If omitted,
+  a timestamped `.png` is written to an `out/` folder next to `input_folder`.
 - `spec`: Optional render specification. Defaults to `TimesliceSpec()`.
 - `resize_mode`: Strategy used when later source images do not match the base
   frame size:
@@ -131,7 +138,6 @@ from fragmento_engine import SliceEffects, TimesliceSpec, render_folder
 
 response = render_folder(
     input_folder=Path("./frames"),
-    output_file=Path("./out/timeslice.jpg"),
     spec=TimesliceSpec(
         orientation="horizontal",
         num_slices=24,
@@ -153,6 +159,68 @@ response = render_folder(
 
 print(response.result.image.shape)
 print(len(response.input_paths))
+print(response.output_file)
+```
+
+### `fragmento_engine.render_progression_gif`
+
+```python
+render_progression_gif(
+    input_folder: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    resize_mode: Literal["crop", "resize"] = "crop",
+    frame_duration_ms: int = 250,
+    smooth_loop: bool = False,
+) -> RenderResponse
+```
+
+Load an image sequence from a folder, render a power-of-two slice progression,
+and save it as an animated GIF.
+
+Behavior:
+
+- Starts at `1` slice.
+- Doubles the slice count on each frame.
+- Includes the first count that exceeds the number of input images when the
+  image span can still support it.
+- When `smooth_loop=True`, appends the reverse walk through the slice counts
+  without duplicating the peak frame.
+- Writes a timestamped `.gif` into an `out/` folder next to `input_folder`
+  when `output_file` is omitted.
+
+Returns:
+
+- `RenderResponse`: Final frame result, ordered input paths, saved GIF path,
+  and the rendered progression slice counts.
+
+Example:
+
+```python
+from pathlib import Path
+
+from fragmento_engine import SliceEffects, TimesliceSpec, render_progression_gif
+
+response = render_progression_gif(
+    input_folder=Path("./frames"),
+    spec=TimesliceSpec(
+        orientation="vertical",
+        reverse_time=False,
+        effects=SliceEffects(
+            border_width=4,
+            border_color_mode="gradient",
+            shadow_width=8,
+            highlight_width=4,
+            feather_width=6,
+            curve="smoothstep",
+        ),
+    ),
+    frame_duration_ms=180,
+    smooth_loop=True,
+)
+
+print(response.output_file)
+print(response.slice_counts)
 ```
 
 ## Data Types
@@ -317,6 +385,8 @@ Structured input for the folder-based render workflow.
 RenderResponse(
     result: CompositeResult,
     input_paths: list[Path],
+    output_file: Path | None = None,
+    slice_counts: list[int] | None = None,
 )
 ```
 
@@ -344,6 +414,12 @@ Methods:
 
 ```python
 save(image: RGBImage, output_file: Path) -> None
+save_gif(
+    images: Sequence[RGBImage],
+    output_file: Path,
+    *,
+    duration_ms: int = 250,
+) -> None
 ```
 
 ### `fragmento_engine.application.services.RenderTimesliceService`
@@ -371,10 +447,27 @@ renders the composite, and returns the result.
 #### `render_to_file`
 
 ```python
-render_to_file(request: RenderRequest, output_file: Path) -> RenderResponse
+render_to_file(
+    request: RenderRequest,
+    output_file: Path | None = None,
+) -> RenderResponse
 ```
 
 Runs `render`, then persists the rendered image through the configured writer.
+
+#### `render_progression_gif_to_file`
+
+```python
+render_progression_gif_to_file(
+    request: RenderRequest,
+    output_file: Path | None = None,
+    *,
+    duration_ms: int = 250,
+    smooth_loop: bool = False,
+) -> RenderResponse
+```
+
+Builds a power-of-two slice progression and persists it as an animated GIF.
 
 #### `create_render_service`
 
@@ -487,6 +580,12 @@ Methods:
 
 ```python
 save(image: RGBImage, output_file: Path) -> None
+save_gif(
+    images: Sequence[RGBImage],
+    output_file: Path,
+    *,
+    duration_ms: int = 250,
+) -> None
 ```
 
 Behavior:
@@ -522,6 +621,9 @@ Supported arguments:
 - `--orientation {vertical,horizontal}`
 - `--slices`
 - `--resize-mode {crop,resize}`
+- `--progression-gif`
+- `--gif-frame-duration-ms`
+- `--gif-smooth-loop`
 - `--reverse-time`
 - `--border`
 - `--border-color`
@@ -540,7 +642,13 @@ Supported arguments:
 Prefer the package root for normal library usage:
 
 ```python
-from fragmento_engine import SliceEffects, TimesliceSpec, render_folder, render_images
+from fragmento_engine import (
+    SliceEffects,
+    TimesliceSpec,
+    render_folder,
+    render_images,
+    render_progression_gif,
+)
 ```
 
 Use lower-level modules when you need tighter control over the render pipeline:

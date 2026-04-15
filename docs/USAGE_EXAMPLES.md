@@ -9,6 +9,9 @@ Use `fragmento` if the package is installed. If not, replace it with:
 python -m fragmento_engine.interface.cli
 ```
 
+If you omit the output path, Fragmento writes a timestamped file into an
+`out/` folder next to the input folder.
+
 ## Highlight Only
 
 ```sh
@@ -145,6 +148,25 @@ fragmento ./frames ./out/full-overlay.jpg \
   --highlight-opacity 0.22 \
   --highlight-color '#fff2cc' \
   --feather 10 \
+  --curve smoothstep
+```
+
+## Progression GIF
+
+```sh
+fragmento ./frames \
+  --progression-gif \
+  --gif-smooth-loop \
+  --gif-frame-duration-ms 180 \
+  --orientation vertical \
+  --border 4 \
+  --border-color-mode gradient \
+  --border-opacity 0.8 \
+  --shadow 8 \
+  --shadow-opacity 0.35 \
+  --highlight 4 \
+  --highlight-opacity 0.2 \
+  --feather 6 \
   --curve smoothstep
 ```
 
