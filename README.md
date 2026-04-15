@@ -39,8 +39,8 @@ Fragmento Engine is organized into layers:
 - **Infrastructure**: image loading and writing adapters
 - **Interface**: CLI and future user-facing entry points
 
-See [API_REFERENCE.md](docs/API_REFERENCE.md) for the Python API surface and
-module-level reference.
+See [the API reference](https://github.com/nxaden/fragmento-engine/blob/main/docs/API_REFERENCE.md)
+for the Python API surface and module-level reference.
 
 ## Project Structure
 
@@ -66,10 +66,16 @@ src/
 
 ## Installation
 
-Clone the repository and install the project in your environment.
+For local development:
 
 ```sh
 make setup
+```
+
+Once the package is published, the install command will be:
+
+```sh
+pip install fragmento-engine
 ```
 
 ## Development
@@ -183,7 +189,20 @@ fragmento ./frames \
 ```
 
 More CLI recipes, including overlay practice commands, live in
-[docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md).
+[the usage examples guide](https://github.com/nxaden/fragmento-engine/blob/main/docs/USAGE_EXAMPLES.md).
+
+## Packaging
+
+Release-oriented commands:
+
+```sh
+make release-check
+make build
+make check-dist
+```
+
+The release checklist lives in
+[RELEASING.md](https://github.com/nxaden/fragmento-engine/blob/main/RELEASING.md).
 
 ## Roadmap
 

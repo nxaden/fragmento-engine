@@ -5,12 +5,11 @@ ACTIVATE := source $(VENV)/bin/activate
 setup:
 	$(PYTHON) -m venv $(VENV)
 	$(ACTIVATE) && pip install --upgrade pip
-	$(ACTIVATE) && pip install -r requirements.txt -r requirements-dev.txt
-	$(ACTIVATE) && pip install -e .
+	$(ACTIVATE) && pip install -e ".[dev]"
 	$(ACTIVATE) && pre-commit install
 
 run:
-	$(ACTIVATE) && python app.py
+	$(ACTIVATE) && python -m fragmento_engine.interface.cli --help
 
 test:
 	$(ACTIVATE) && pytest
@@ -28,3 +27,14 @@ check:
 	$(ACTIVATE) && ruff check .
 	$(ACTIVATE) && mypy src
 	$(ACTIVATE) && pytest
+
+clean:
+	rm -rf build dist src/*.egg-info
+
+build:
+	$(ACTIVATE) && python -m build
+
+check-dist:
+	$(ACTIVATE) && python -m twine check dist/*
+
+release-check: check build check-dist

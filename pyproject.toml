@@ -6,10 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "fragmento-engine"
 version = "0.1.0"
 description = "A Python timeslice rendering engine for building composite images from frame sequences."
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 authors = [{ name = "Abdullah Shahid" }]
-license = { text = "MIT" }
+license = "MIT"
 
 dependencies = [
   "numpy",
@@ -28,7 +28,6 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: End Users/Desktop",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -39,16 +38,31 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "black",
+  "build",
+  "mypy",
+  "pre-commit",
+  "pytest",
+  "ruff",
+  "twine",
+]
+
 [project.urls]
 Homepage = "https://github.com/nxaden/fragmento-engine"
 Repository = "https://github.com/nxaden/fragmento-engine"
 Issues = "https://github.com/nxaden/fragmento-engine/issues"
+Documentation = "https://github.com/nxaden/fragmento-engine/tree/main/docs"
 
 [project.scripts]
 fragmento = "fragmento_engine.interface.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+
+[tool.setuptools.package-data]
+fragmento_engine = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

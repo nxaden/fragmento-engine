@@ -12,8 +12,13 @@ Assume the local virtual environment created by `make setup`.
 - `make typecheck`: run `mypy src`
 - `make check`: run the canonical verification stack in this order:
   `ruff check .`, `mypy src`, `pytest`
+- `make build`: create wheel and sdist artifacts under `dist/`
+- `make check-dist`: validate built package metadata and README rendering with
+  Twine
 
 Prefer `make check` before finishing a feature unless the change is docs-only.
+Prefer `make build` and `make check-dist` before finishing packaging or release
+work.
 
 ## Architecture Rules
 
