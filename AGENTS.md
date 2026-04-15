@@ -15,12 +15,14 @@ Assume the local virtual environment created by `make setup`.
 - `make build`: create wheel and sdist artifacts under `dist/`
 - `make check-dist`: validate built package metadata and README rendering with
   Twine
+- `make docs-build`: build the external docs site with MkDocs
 
 Prefer `make check` before finishing a feature unless the change is docs-only.
 Prefer `make build` and `make check-dist` before finishing packaging or release
 work.
 GitHub Actions mirrors `make check` and `make build` plus `make check-dist`;
 keep the workflow and Make targets aligned.
+For docs changes, prefer `make docs-build` before finishing.
 
 ## Architecture Rules
 

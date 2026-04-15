@@ -1,0 +1,68 @@
+site_name: pytimeslice
+site_description: Python library for rendering timeslice composite images
+site_url: https://nxaden.github.io/pytimeslice/
+repo_url: https://github.com/nxaden/pytimeslice
+repo_name: nxaden/pytimeslice
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: cyan
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+          options:
+            docstring_style: google
+            inherited_members: true
+            members_order: source
+            merge_init_into_class: true
+            parameter_headings: true
+            separate_signature: true
+            show_root_heading: true
+            show_root_toc_entry: false
+            show_signature_annotations: true
+            show_source: false
+            summary: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - codehilite
+  - footnotes
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quickstart: quickstart.md
+  - Guides:
+      - Usage Examples: USAGE_EXAMPLES.md
+      - Developer Guide: DEVELOPER_GUIDE.md
+      - Legacy API Notes: API_REFERENCE.md
+      - Architecture:
+          - Overview: architecture/README.md
+          - Domain Layer: architecture/01_DOMAIN_LAYER.md
+          - Infrastructure Layer: architecture/02_INFRASTRUCTURE_LAYER.md
+          - Application Layer: architecture/03_APPLICATION_LAYER.md
+          - Interface Layer: architecture/04_INTERFACE_LAYER.md
+  - API Reference:
+      - Overview: api/index.md
+      - Application Services: api/application.md
+      - Domain: api/domain.md
+      - Infrastructure: api/infrastructure.md
+      - CLI: api/cli.md

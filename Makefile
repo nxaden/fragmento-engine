@@ -10,6 +10,7 @@ BLACK := $(VENV_BIN)/black
 MYPY := $(VENV_BIN)/mypy
 TWINE := $(VENV_BIN)/python -m twine
 BUILD := $(VENV_BIN)/python -m build
+MKDOCS := $(VENV_BIN)/mkdocs
 
 bootstrap:
 	$(PYTHON) -m venv $(VENV)
@@ -50,5 +51,11 @@ check-dist:
 
 publish-testpypi:
 	$(TWINE) upload --repository testpypi dist/*
+
+docs-build:
+	$(MKDOCS) build --strict
+
+docs-serve:
+	$(MKDOCS) serve
 
 release-check: check build check-dist

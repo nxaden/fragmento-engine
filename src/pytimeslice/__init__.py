@@ -1,3 +1,5 @@
+"""Public package API for pytimeslice."""
+
 from importlib.metadata import PackageNotFoundError, version
 
 from pytimeslice.app import (

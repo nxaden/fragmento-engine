@@ -207,6 +207,16 @@ The release checklist lives in
 Release notes live in
 [CHANGELOG.md](https://github.com/nxaden/pytimeslice/blob/main/CHANGELOG.md).
 
+## Docs
+
+The human-facing docs site is built with MkDocs and generated API reference
+pages from the package docstrings.
+
+```sh
+make docs-build
+make docs-serve
+```
+
 ## Roadmap
 
 Planned improvements include:

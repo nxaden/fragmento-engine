@@ -1,3 +1,5 @@
+"""Command-line interface for rendering pytimeslice outputs."""
+
 from __future__ import annotations
 
 import argparse
@@ -95,6 +97,7 @@ def _build_effects(args: argparse.Namespace) -> SliceEffects | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Create the argparse parser for the `pytimeslice` command."""
     parser = argparse.ArgumentParser(
         description="Create a time-slice image from a sequence of photos."
     )
@@ -212,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the command-line interface."""
     parser = build_parser()
     args = parser.parse_args()
 

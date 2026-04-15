@@ -29,7 +29,8 @@ class ImageSequenceLoader(Protocol):
             A list of image paths in processing order.
 
         Raises:
-            Implementations may raise exceptions if the folder cannot be read.
+            OSError: Implementations may raise an OS-level error if the folder
+                cannot be read.
         """
         ...
 

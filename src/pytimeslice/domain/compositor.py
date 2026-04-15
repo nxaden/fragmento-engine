@@ -1,3 +1,5 @@
+"""Compositing primitives for building timeslice images from plans."""
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -381,6 +383,7 @@ def apply_timeslice_plan(
     plan: TimeslicePlan,
     effects: SliceEffects | None = None,
 ) -> CompositeResult:
+    """Apply a slice plan to images and return the rendered composite."""
     height, width, _ = _validate_images(images)
     output = np.zeros((height, width, 3), dtype=np.uint8)
 
@@ -413,6 +416,7 @@ def build_timeslice(
     images: Sequence[RGBImage],
     spec: TimesliceSpec | None = None,
 ) -> CompositeResult:
+    """Build a complete timeslice composite from images and a render spec."""
     if spec is None:
         spec = TimesliceSpec()
 

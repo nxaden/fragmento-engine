@@ -1,3 +1,5 @@
+"""Slice planning primitives for turning render intent into pixel bands."""
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -46,6 +48,7 @@ def build_timeslice_plan(
     images: Sequence[RGBImage],
     spec: TimesliceSpec,
 ) -> TimeslicePlan:
+    """Build a concrete slice plan for a normalized image sequence."""
     height, width, _ = _validate_images(images)
 
     num_slices = spec.num_slices if spec.num_slices is not None else len(images)

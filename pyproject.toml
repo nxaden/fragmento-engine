@@ -39,9 +39,18 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.26",
+]
+
 dev = [
   "black",
   "build",
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.26",
   "mypy",
   "pre-commit",
   "pytest",
