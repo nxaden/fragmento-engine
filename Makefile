@@ -22,4 +22,9 @@ format:
 	$(ACTIVATE) && black .
 
 typecheck:
-	$(ACTIVATE) && mypy .
+	$(ACTIVATE) && mypy src
+
+check:
+	$(ACTIVATE) && ruff check .
+	$(ACTIVATE) && mypy src
+	$(ACTIVATE) && pytest
