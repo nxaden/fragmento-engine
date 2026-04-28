@@ -25,6 +25,9 @@ releases begin.
 - CLI support for manual assignment with `--assigned-path`, `--slot-path`, and
   `--manual-empty`, including partial black-slot previews and configurable
   manual canvas dimensions.
+- Random-layout animated GIF support in both the Python API and CLI through a
+  dedicated seed-shuffle workflow, including configurable frame counts and
+  smooth-loop emission.
 
 ### Changed
 

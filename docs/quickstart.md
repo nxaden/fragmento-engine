@@ -38,6 +38,22 @@ saved = render_folder_to_file(Path("./frames"))
 print(saved.output_file)
 ```
 
+To render a random-layout animated GIF:
+
+```python
+from pathlib import Path
+
+from pytimeslice import TimesliceSpec, render_random_gif
+
+animated = render_random_gif(
+    input_folder=Path("./frames"),
+    spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    frame_count=8,
+    frame_duration_ms=180,
+    smooth_loop=True,
+)
+```
+
 Built-in mask layouts are also available from the Python API:
 
 ```python
@@ -142,6 +158,19 @@ pytimeslice ./out/manual-empty.png \
   --manual-empty \
   --layout diagonal \
   --slices 5
+```
+
+Random-layout animated GIF:
+
+```sh
+pytimeslice ./frames ./out/random-shuffle.gif \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7 \
+  --random-gif \
+  --random-gif-frames 8 \
+  --gif-smooth-loop \
+  --gif-frame-duration-ms 180
 ```
 
 In manual mode, the first positional path is the output file. Unassigned slots

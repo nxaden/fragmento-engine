@@ -8,6 +8,7 @@ import numpy as np
 from pytimeslice.application.services import (
     ManualTimesliceCanvas,
     ProgressionGifRenderResponse,
+    RandomGifRenderResponse,
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
@@ -368,5 +369,39 @@ def render_progression_gif(
         request=request,
         output_file=output_file,
         duration_ms=frame_duration_ms,
+        smooth_loop=smooth_loop,
+    )
+
+
+def render_random_gif(
+    input_folder: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+    frame_duration_ms: int = 250,
+    frame_count: int = 8,
+    smooth_loop: bool = False,
+) -> RandomGifRenderResponse:
+    """Render a random-layout shuffle GIF from a folder of images.
+
+    The renderer keeps the same random block layout mode but advances the
+    effective random seed once per emitted keyframe. If `output_file` is
+    omitted, a timestamped GIF is written into a sibling `out/` directory
+    next to the input folder.
+    """
+    if spec is None:
+        spec = TimesliceSpec(layout="random")
+
+    service = create_render_service()
+    request = RenderRequest(
+        input_folder=input_folder,
+        spec=spec,
+        resize_mode=resize_mode,
+    )
+    return service.render_random_gif_to_file(
+        request=request,
+        output_file=output_file,
+        duration_ms=frame_duration_ms,
+        frame_count=frame_count,
         smooth_loop=smooth_loop,
     )

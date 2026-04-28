@@ -153,6 +153,29 @@ class ProgressionGifRenderResponse:
 
 
 @dataclass(frozen=True)
+class RandomGifRenderResponse:
+    """Output payload for a random-layout GIF render workflow.
+
+    Attributes:
+        initial_result: The first random-layout render generated for the GIF.
+        last_emitted_result: The final frame emitted into the GIF sequence.
+        input_paths: The ordered source image paths used during rendering.
+        output_file: Saved GIF location.
+        base_seeds: The forward random-seed sequence rendered before any
+            smooth-loop expansion.
+        emitted_seeds: The actual seed order encoded into the GIF, including
+            any smooth-loop walk-back frames.
+    """
+
+    initial_result: CompositeResult
+    last_emitted_result: CompositeResult
+    input_paths: list[Path]
+    output_file: Path
+    base_seeds: list[int]
+    emitted_seeds: list[int]
+
+
+@dataclass(frozen=True)
 class ManualTimesliceCanvas:
     """Stateful in-memory canvas for manually assigned slice content.
 
@@ -242,11 +265,11 @@ def _progression_slice_counts(
     return counts
 
 
-def _smooth_loop_slice_counts(slice_counts: Sequence[int]) -> list[int]:
-    counts = list(slice_counts)
-    if len(counts) < 3:
-        return counts
-    return counts + counts[-2:0:-1]
+def _smooth_loop_values(values: Sequence[int]) -> list[int]:
+    smoothed = list(values)
+    if len(smoothed) < 3:
+        return smoothed
+    return smoothed + smoothed[-2:0:-1]
 
 
 class RenderTimesliceService:
@@ -391,9 +414,7 @@ class RenderTimesliceService:
             span=span,
         )
         emitted_slice_counts = (
-            _smooth_loop_slice_counts(base_slice_counts)
-            if smooth_loop
-            else base_slice_counts
+            _smooth_loop_values(base_slice_counts) if smooth_loop else base_slice_counts
         )
 
         peak_results = [
@@ -429,4 +450,62 @@ class RenderTimesliceService:
             output_file=resolved_output,
             base_slice_counts=base_slice_counts,
             emitted_slice_counts=emitted_slice_counts,
+        )
+
+    def render_random_gif_to_file(
+        self,
+        request: RenderRequest,
+        output_file: Path | None = None,
+        *,
+        duration_ms: int = 250,
+        frame_count: int = 8,
+        smooth_loop: bool = False,
+    ) -> RandomGifRenderResponse:
+        """Render a random-layout shuffle GIF and save it to disk."""
+        if self._image_writer is None:
+            raise ValueError("No image writer configured.")
+        if duration_ms <= 0:
+            raise ValueError("duration_ms must be greater than 0.")
+        if frame_count <= 0:
+            raise ValueError("frame_count must be greater than 0.")
+        if request.spec.layout != "random":
+            raise ValueError("Random GIF requires layout='random'.")
+
+        paths, images = self._load_paths_and_images(request)
+        base_seed = (
+            request.spec.random_seed if request.spec.random_seed is not None else 0
+        )
+        base_seeds = [base_seed + frame_index for frame_index in range(frame_count)]
+        emitted_seeds = _smooth_loop_values(base_seeds) if smooth_loop else base_seeds
+
+        initial_results = [
+            build_timeslice(
+                images=images,
+                spec=replace(request.spec, random_seed=seed),
+            )
+            for seed in base_seeds
+        ]
+        results_by_seed = {
+            seed: result for seed, result in zip(base_seeds, initial_results)
+        }
+        frames = [results_by_seed[seed].image for seed in emitted_seeds]
+        resolved_output = _resolve_output_file(
+            request.input_folder,
+            output_file,
+            suffix=".gif",
+            label="random-shuffle",
+            require_suffix=True,
+        )
+        self._image_writer.save_gif(
+            frames,
+            resolved_output,
+            duration_ms=duration_ms,
+        )
+        return RandomGifRenderResponse(
+            initial_result=initial_results[0],
+            last_emitted_result=results_by_seed[emitted_seeds[-1]],
+            input_paths=paths,
+            output_file=resolved_output,
+            base_seeds=base_seeds,
+            emitted_seeds=emitted_seeds,
         )

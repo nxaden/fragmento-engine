@@ -15,6 +15,7 @@ from pytimeslice import (
     render_assigned_paths,
     render_folder_to_file,
     render_progression_gif,
+    render_random_gif,
 )
 from pytimeslice import SliceEffects, TimesliceSpec
 from pytimeslice.app import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
@@ -188,6 +189,8 @@ def _render_manual_assignment(
 ) -> None:
     if args.progression_gif:
         parser.error("Progression GIF is not supported with manual assignment mode.")
+    if args.random_gif:
+        parser.error("Random GIF is not supported with manual assignment mode.")
     if args.assigned_paths and args.slot_paths:
         parser.error("--assigned-path cannot be combined with --slot-path.")
     if args.manual_empty and (args.assigned_paths or args.slot_paths):
@@ -403,18 +406,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--random-gif",
+        action="store_true",
+        help=(
+            "Render an animated GIF for --layout random by advancing the "
+            "random seed once per keyframe."
+        ),
+    )
+    parser.add_argument(
+        "--random-gif-frames",
+        type=_parse_positive_int,
+        default=8,
+        metavar="COUNT",
+        help="Number of forward keyframes to render for --random-gif.",
+    )
+    parser.add_argument(
         "--gif-frame-duration-ms",
         type=_parse_positive_int,
         default=250,
-        help="Per-frame duration in milliseconds for progression GIFs.",
+        help="Per-frame duration in milliseconds for animated GIF outputs.",
     )
     parser.add_argument(
         "--gif-smooth-loop",
         action="store_true",
-        help=(
-            "Use a ping-pong GIF sequence that walks back down through the "
-            "slice counts before looping."
-        ),
+        help=("Use a ping-pong GIF sequence for animated GIF outputs before looping."),
     )
     parser.add_argument("--reverse-time", action="store_true")
     parser.add_argument(
@@ -505,11 +520,15 @@ def main() -> None:
 
     if args.input_folder is None:
         parser.error("input_folder is required unless manual assignment mode is used.")
+    if args.progression_gif and args.random_gif:
+        parser.error("--progression-gif cannot be combined with --random-gif.")
     if args.progression_gif and spec.layout == "random":
         parser.error("Progression GIF is not currently supported with --layout random.")
+    if args.random_gif and spec.layout != "random":
+        parser.error("Random GIF currently requires --layout random.")
 
     if args.progression_gif:
-        gif_response = render_progression_gif(
+        progression_response = render_progression_gif(
             input_folder=args.input_folder,
             output_file=args.output_file,
             spec=spec,
@@ -517,10 +536,26 @@ def main() -> None:
             frame_duration_ms=args.gif_frame_duration_ms,
             smooth_loop=args.gif_smooth_loop,
         )
-        print(f"Rendered using {len(gif_response.input_paths)} images.")
-        counts = ", ".join(str(count) for count in gif_response.emitted_slice_counts)
+        print(f"Rendered using {len(progression_response.input_paths)} images.")
+        counts = ", ".join(
+            str(count) for count in progression_response.emitted_slice_counts
+        )
         print(f"Slice counts: {counts}")
-        print(f"Saved: {gif_response.output_file}")
+        print(f"Saved: {progression_response.output_file}")
+    elif args.random_gif:
+        random_gif_response = render_random_gif(
+            input_folder=args.input_folder,
+            output_file=args.output_file,
+            spec=spec,
+            resize_mode=args.resize_mode,
+            frame_duration_ms=args.gif_frame_duration_ms,
+            frame_count=args.random_gif_frames,
+            smooth_loop=args.gif_smooth_loop,
+        )
+        print(f"Rendered using {len(random_gif_response.input_paths)} images.")
+        seeds = ", ".join(str(seed) for seed in random_gif_response.emitted_seeds)
+        print(f"Seeds: {seeds}")
+        print(f"Saved: {random_gif_response.output_file}")
     else:
         image_response = render_folder_to_file(
             input_folder=args.input_folder,

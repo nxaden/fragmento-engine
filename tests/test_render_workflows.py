@@ -8,6 +8,7 @@ import pytimeslice.app as app_module
 from pytimeslice import render_images
 from pytimeslice.application.services import (
     ProgressionGifRenderResponse,
+    RandomGifRenderResponse,
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
@@ -326,6 +327,133 @@ def test_render_progression_gif_rejects_random_layout_before_loading_images(
     assert loader.load_images_calls == 0
 
 
+def test_render_random_gif_uses_incrementing_seed_sequence(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(4)]
+    images = [_solid_frame(index * 60, width=4, height=4) for index in range(4)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+
+    response = service.render_random_gif_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=7),
+        ),
+        duration_ms=90,
+        frame_count=3,
+    )
+
+    assert isinstance(response, RandomGifRenderResponse)
+    assert response.base_seeds == [7, 8, 9]
+    assert response.emitted_seeds == [7, 8, 9]
+    assert response.output_file.parent == tmp_path / "out"
+    assert response.output_file.suffix == ".gif"
+    assert response.output_file.name.endswith("-random-shuffle.gif")
+
+    assert len(writer.saved_gifs) == 1
+    frames, output_file, duration_ms = writer.saved_gifs[0]
+    assert output_file == response.output_file
+    assert duration_ms == 90
+    assert len(frames) == 3
+
+    expected_frames = [
+        render_images(
+            images=images,
+            spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=seed),
+        ).image
+        for seed in (7, 8, 9)
+    ]
+    assert all(
+        np.array_equal(frame, expected)
+        for frame, expected in zip(frames, expected_frames)
+    )
+
+
+def test_render_random_gif_supports_smooth_loop(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(4)]
+    images = [_solid_frame(index * 60, width=4, height=4) for index in range(4)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+
+    response = service.render_random_gif_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=3),
+        ),
+        duration_ms=90,
+        frame_count=3,
+        smooth_loop=True,
+    )
+
+    assert response.base_seeds == [3, 4, 5]
+    assert response.emitted_seeds == [3, 4, 5, 4]
+    expected_last = render_images(
+        images=images,
+        spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=4),
+    )
+    assert np.array_equal(response.last_emitted_result.image, expected_last.image)
+    assert response.last_emitted_result.plan.layout == expected_last.plan.layout
+    assert response.last_emitted_result.plan.slice_frame_indices == (
+        expected_last.plan.slice_frame_indices
+    )
+    assert response.last_emitted_result.plan.slice_map is not None
+    assert expected_last.plan.slice_map is not None
+    assert np.array_equal(
+        response.last_emitted_result.plan.slice_map,
+        expected_last.plan.slice_map,
+    )
+    assert (
+        response.last_emitted_result.used_frame_indices
+        == expected_last.used_frame_indices
+    )
+
+    assert len(writer.saved_gifs) == 1
+    frames, _, duration_ms = writer.saved_gifs[0]
+    assert len(frames) == 4
+    assert duration_ms == 90
+
+
+def test_render_random_gif_rejects_non_random_layout_before_loading_images(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    loader = RecordingLoader(
+        paths=[input_folder / "001.png"],
+        images=[_solid_frame(0, width=4, height=4)],
+    )
+    service = RenderTimesliceService(
+        sequence_loader=loader,
+        image_writer=RecordingWriter(),
+    )
+
+    with pytest.raises(ValueError, match="requires layout='random'"):
+        service.render_random_gif_to_file(
+            RenderRequest(
+                input_folder=input_folder,
+                spec=TimesliceSpec(layout="circular", num_slices=4),
+            ),
+            duration_ms=120,
+            frame_count=3,
+        )
+
+    assert loader.get_image_paths_calls == 0
+    assert loader.load_images_calls == 0
+
+
 def test_service_rejects_invalid_effects_before_loading_images(
     tmp_path: Path,
 ) -> None:
@@ -397,6 +525,24 @@ def test_cli_output_file_is_optional_for_progression_gif() -> None:
     assert args.progression_gif is True
     assert args.gif_frame_duration_ms == 180
     assert args.gif_smooth_loop is True
+
+
+def test_cli_random_gif_output_file_is_optional() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--random-gif",
+            "--random-gif-frames",
+            "6",
+        ]
+    )
+
+    assert args.output_file is None
+    assert args.random_gif is True
+    assert args.random_gif_frames == 6
 
 
 def test_cli_builds_diagonal_layout_spec() -> None:
@@ -561,6 +707,47 @@ def test_cli_rejects_invalid_random_block_count() -> None:
         _build_spec(args, parser)
 
 
+def test_cli_rejects_random_gif_for_non_random_layout(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            "frames",
+            "--layout",
+            "circular",
+            "--random-gif",
+            "--slices",
+            "4",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main()
+
+
+def test_cli_rejects_progression_gif_with_random_gif(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            "frames",
+            "--layout",
+            "random",
+            "--random-blocks",
+            "4",
+            "--progression-gif",
+            "--random-gif",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main()
+
+
 def test_cli_rejects_effects_for_non_band_layouts() -> None:
     parser = build_parser()
     args = parser.parse_args(
@@ -618,6 +805,45 @@ def test_cli_rejects_non_positive_gif_duration() -> None:
                 "0",
             ]
         )
+
+
+def test_cli_random_gif_renders_output(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    for index, value in enumerate((0, 60, 120, 180)):
+        Image.fromarray(_solid_frame(value, width=4, height=4)).save(
+            input_folder / f"{index:03}.png"
+        )
+
+    output_file = tmp_path / "random-shuffle.gif"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(input_folder),
+            str(output_file),
+            "--layout",
+            "random",
+            "--random-blocks",
+            "4",
+            "--random-seed",
+            "7",
+            "--random-gif",
+            "--random-gif-frames",
+            "3",
+            "--gif-frame-duration-ms",
+            "90",
+        ],
+    )
+
+    cli_main()
+
+    with Image.open(output_file) as rendered:
+        assert rendered.n_frames == 3
+        assert rendered.size == (4, 4)
 
 
 def test_cli_manual_assigned_paths_renders_output(

@@ -195,6 +195,22 @@ pytimeslice ./frames ./out/random-layout.jpg \
   --random-seed 7
 ```
 
+## Random Shuffle GIF
+
+```sh
+pytimeslice ./frames ./out/random-shuffle.gif \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7 \
+  --random-gif \
+  --random-gif-frames 8 \
+  --gif-smooth-loop \
+  --gif-frame-duration-ms 180
+```
+
+This keeps the same random block count but advances the random seed once per
+forward keyframe.
+
 ## User-Defined Mask Layout
 
 ```sh

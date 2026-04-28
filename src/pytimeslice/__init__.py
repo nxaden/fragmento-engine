@@ -12,6 +12,7 @@ from pytimeslice.app import (
     render_assigned_paths,
     render_images,
     render_progression_gif,
+    render_random_gif,
 )
 from pytimeslice.application.services import ManualTimesliceCanvas
 from pytimeslice.domain.models import SliceEffects, TimesliceSpec
@@ -33,6 +34,7 @@ __all__ = [
     "render_assigned_paths",
     "render_images",
     "render_progression_gif",
+    "render_random_gif",
     "SliceEffects",
     "TimesliceSpec",
 ]
