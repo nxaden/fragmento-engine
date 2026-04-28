@@ -54,6 +54,43 @@ random_blocks = render_images(
 )
 ```
 
+Manual slot assignment is available when a caller wants to control the exact
+image-to-slice mapping instead of letting the renderer choose frame placement:
+
+```python
+from pathlib import Path
+
+from pytimeslice import (
+    TimesliceSpec,
+    assign_image_to_slot,
+    create_manual_timeslice,
+    render_assigned_paths,
+)
+
+spec = TimesliceSpec(orientation="horizontal", num_slices=5)
+
+final_canvas = render_assigned_paths(
+    paths=[
+        Path("./frames/a.jpg"),
+        Path("./frames/b.jpg"),
+        Path("./frames/c.jpg"),
+        Path("./frames/d.jpg"),
+        Path("./frames/e.jpg"),
+    ],
+    spec=spec,
+)
+
+builder = create_manual_timeslice(spec)  # defaults to 3840x2160
+builder = assign_image_to_slot(builder, 0, first_frame)
+builder = assign_image_to_slot(builder, 1, second_frame)
+
+print(final_canvas.is_complete)
+print(builder.filled_slot_indices)
+```
+
+For manual assignment, `spec.num_slices` must be set explicitly. Unfilled slots
+render as black in the preview image.
+
 ## CLI
 
 ```sh

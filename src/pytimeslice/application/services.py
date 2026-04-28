@@ -11,6 +11,7 @@ from pytimeslice.domain.planner import max_supported_slices
 from pytimeslice.domain.models import (
     CompositeResult,
     RGBImage,
+    TimeslicePlan,
     TimesliceSpec,
     validate_timeslice_spec,
 )
@@ -149,6 +150,36 @@ class ProgressionGifRenderResponse:
     output_file: Path
     base_slice_counts: list[int]
     emitted_slice_counts: list[int]
+
+
+@dataclass(frozen=True)
+class ManualTimesliceCanvas:
+    """Stateful in-memory canvas for manually assigned slice content.
+
+    Attributes:
+        spec: The layout specification that defines the slice geometry.
+        plan: Concrete plan for applying slot images to the output image.
+        width: Output width in pixels.
+        height: Output height in pixels.
+        slot_count: Total number of assignable slice slots.
+        slot_images: Per-slot normalized images, or `None` for empty slots.
+        image: Current composite preview with empty slots rendered as black.
+        filled_slot_indices: Sorted slot indices that have been assigned.
+    """
+
+    spec: TimesliceSpec
+    plan: TimeslicePlan
+    width: int
+    height: int
+    slot_count: int
+    slot_images: list[RGBImage | None]
+    image: RGBImage
+    filled_slot_indices: list[int]
+
+    @property
+    def is_complete(self) -> bool:
+        """Return whether every slot currently has an assigned image."""
+        return len(self.filled_slot_indices) == self.slot_count
 
 
 def _default_output_file(

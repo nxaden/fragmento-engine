@@ -143,6 +143,58 @@ custom = render_images(
 )
 ```
 
+Manual slot assignment is also available for future UI flows where the caller
+chooses exactly which image belongs in each slice. This requires
+`spec.num_slices` to be set explicitly.
+
+One-shot render from an explicit list of paths:
+
+```python
+from pathlib import Path
+
+from pytimeslice import TimesliceSpec, render_assigned_paths
+
+spec = TimesliceSpec(orientation="horizontal", num_slices=5)
+
+canvas = render_assigned_paths(
+    paths=[
+        Path("./frames/hero.jpg"),
+        Path("./frames/detail-a.jpg"),
+        Path("./frames/detail-b.jpg"),
+        Path("./frames/detail-c.jpg"),
+        Path("./frames/detail-d.jpg"),
+    ],
+    spec=spec,
+)
+
+print(canvas.image.shape)  # (2160, 3840, 3) by default
+print(canvas.is_complete)  # True
+```
+
+Incremental manual build with an empty 4K preview canvas:
+
+```python
+from pytimeslice import (
+    TimesliceSpec,
+    assign_image_to_slot,
+    create_manual_timeslice,
+)
+
+spec = TimesliceSpec(layout="diagonal", num_slices=5)
+
+canvas = create_manual_timeslice(spec)  # defaults to 3840x2160
+canvas = assign_image_to_slot(canvas, 0, first_frame)
+canvas = assign_image_to_slot(canvas, 1, second_frame)
+
+preview = canvas.image
+print(canvas.filled_slot_indices)  # [0, 1]
+print(canvas.is_complete)  # False until every slot is assigned
+```
+
+Empty slots render as black in the preview image, which makes the incremental
+canvas suitable for a client that wants to show progress while the user fills
+each slice manually.
+
 ## CLI Usage
 
 A CLI interface is provided on top of the engine so a folder of source

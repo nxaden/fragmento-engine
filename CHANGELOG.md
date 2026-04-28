@@ -19,6 +19,9 @@ releases begin.
   random block layouts.
 - Random block layouts now accept rectangular power-of-two totals such as
   `128`, not just square totals such as `64` or `256`.
+- Manual slot-assignment helpers for future client flows, including explicit
+  per-slice path/image rendering and an incremental empty-canvas builder that
+  defaults to 4K previews.
 
 ### Changed
 
