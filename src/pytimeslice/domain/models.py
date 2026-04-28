@@ -6,13 +6,23 @@ import numpy as np
 import numpy.typing as npt
 
 Orientation = Literal["vertical", "horizontal"]
-LayoutMode = Literal["bands", "diagonal", "spiral", "circular", "random", "mask"]
+LayoutMode = Literal[
+    "bands", "diagonal", "spiral", "circular", "random", "mask", "slot_map"
+]
 BoundaryCurve = Literal["linear", "smoothstep", "cosine", "hard"]
 BorderColorMode = Literal["solid", "auto", "gradient"]
 RGBColor = tuple[int, int, int]
 RGBImage = npt.NDArray[np.uint8]
 
-_VALID_LAYOUTS = {"bands", "diagonal", "spiral", "circular", "random", "mask"}
+_VALID_LAYOUTS = {
+    "bands",
+    "diagonal",
+    "spiral",
+    "circular",
+    "random",
+    "mask",
+    "slot_map",
+}
 _VALID_BORDER_COLOR_MODES = {"solid", "auto", "gradient"}
 _VALID_CURVES = {"linear", "smoothstep", "cosine", "hard"}
 
@@ -109,7 +119,9 @@ class TimesliceSpec:
     `orientation`. `layout="diagonal"`, `layout="spiral"`, and
     `layout="circular"` use built-in mask-based layouts. `layout="random"`
     uses a seeded random block grid. `layout="mask"` expects `layout_mask` to
-    be a 2D array matching the input image height and width.
+    be a 2D array matching the input image height and width. `layout="slot_map"`
+    expects `layout_slot_map` to be a 2D integer label map, usually coming from
+    a client-side editor.
     """
 
     orientation: Orientation = "vertical"
@@ -120,12 +132,14 @@ class TimesliceSpec:
     random_seed: int | None = None
     effects: SliceEffects | None = None
     layout_mask: npt.ArrayLike | None = None
+    layout_slot_map: npt.ArrayLike | None = None
 
 
 def validate_timeslice_spec(spec: TimesliceSpec) -> None:
     if spec.layout not in _VALID_LAYOUTS:
         raise ValueError(
-            "layout must be one of bands, diagonal, spiral, circular, random, or mask."
+            "layout must be one of bands, diagonal, spiral, circular, random, "
+            "mask, or slot_map."
         )
     if spec.num_slices is not None and spec.num_slices < 1:
         raise ValueError("num_slices must be at least 1.")
@@ -151,6 +165,10 @@ def validate_timeslice_spec(spec: TimesliceSpec) -> None:
         raise ValueError("layout_mask is required when layout='mask'.")
     if spec.layout != "mask" and spec.layout_mask is not None:
         raise ValueError("layout_mask can only be used when layout='mask'.")
+    if spec.layout == "slot_map" and spec.layout_slot_map is None:
+        raise ValueError("layout_slot_map is required when layout='slot_map'.")
+    if spec.layout != "slot_map" and spec.layout_slot_map is not None:
+        raise ValueError("layout_slot_map can only be used when layout='slot_map'.")
     if spec.effects is not None:
         validate_slice_effects(spec.effects)
 

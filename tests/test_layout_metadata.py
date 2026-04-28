@@ -10,7 +10,10 @@ from pytimeslice import (
     describe_layout,
     export_layout_json,
     import_layout_json,
+    import_slot_map,
+    replace_layout_slot_map,
     serialize_layout,
+    validate_slot_map,
 )
 
 
@@ -167,3 +170,99 @@ def test_deserialize_layout_rebuilds_mask_spec_from_serialized_slot_map() -> Non
     assert restored.spec.layout_mask is not None
     replayed = describe_layout(restored.spec, width=2, height=2)
     assert np.array_equal(replayed.slot_map, layout.slot_map)
+
+
+def test_validate_slot_map_normalizes_client_edited_maps() -> None:
+    validated = validate_slot_map(
+        np.array(
+            [
+                [0.0, 0.0, 2.0],
+                [1.0, 1.0, 2.0],
+            ],
+            dtype=np.float64,
+        )
+    )
+
+    assert validated.dtype == np.int_
+    assert np.array_equal(
+        validated,
+        np.array(
+            [
+                [0, 0, 2],
+                [1, 1, 2],
+            ],
+            dtype=np.int_,
+        ),
+    )
+
+
+def test_validate_slot_map_rejects_missing_slot_indices() -> None:
+    with pytest.raises(ValueError, match="contiguous range"):
+        validate_slot_map(np.array([[0, 2]], dtype=np.int_))
+
+
+def test_import_slot_map_creates_explicit_slot_map_layout() -> None:
+    layout = import_slot_map(
+        np.array(
+            [
+                [0, 0, 2],
+                [1, 1, 2],
+            ],
+            dtype=np.int_,
+        )
+    )
+
+    assert layout.spec.layout == "slot_map"
+    assert layout.spec.layout_slot_map is not None
+    assert np.array_equal(layout.slot_map, layout.spec.layout_slot_map)
+    assert layout.slot_count == 3
+
+
+def test_replace_layout_slot_map_uses_new_client_geometry() -> None:
+    layout = describe_layout(
+        TimesliceSpec(orientation="vertical", num_slices=3),
+        width=6,
+        height=2,
+    )
+
+    replaced = replace_layout_slot_map(
+        layout,
+        np.array(
+            [
+                [0, 0, 0, 2, 2, 1],
+                [0, 0, 0, 2, 2, 1],
+            ],
+            dtype=np.int_,
+        ),
+    )
+
+    assert replaced.spec.layout == "slot_map"
+    assert np.array_equal(
+        replaced.slot_map,
+        np.array(
+            [
+                [0, 0, 0, 2, 2, 1],
+                [0, 0, 0, 2, 2, 1],
+            ],
+            dtype=np.int_,
+        ),
+    )
+
+
+def test_serialize_layout_round_trips_imported_slot_map_layout() -> None:
+    layout = import_slot_map(
+        np.array(
+            [
+                [0, 0, 0, 2, 2, 1],
+                [0, 0, 0, 2, 2, 1],
+            ],
+            dtype=np.int_,
+        )
+    )
+
+    restored = deserialize_layout(serialize_layout(layout))
+
+    assert restored.spec.layout == "slot_map"
+    assert restored.spec.layout_slot_map is not None
+    assert np.array_equal(restored.slot_map, layout.slot_map)
+    assert np.array_equal(restored.spec.layout_slot_map, layout.slot_map)

@@ -152,6 +152,46 @@ def _resolve_random_block_count(spec: TimesliceSpec) -> int:
     return spec.num_blocks if spec.num_blocks is not None else 4
 
 
+def _coerce_explicit_slot_map(
+    slot_map: npt.ArrayLike,
+    *,
+    height: int,
+    width: int,
+) -> npt.NDArray[np.int_]:
+    coerced = np.asarray(slot_map)
+
+    if coerced.ndim != 2:
+        raise ValueError("layout_slot_map must be a 2D array.")
+    if coerced.shape != (height, width):
+        raise ValueError(f"layout_slot_map must match image shape ({height}, {width}).")
+    if not np.issubdtype(coerced.dtype, np.integer):
+        if not np.issubdtype(coerced.dtype, np.floating):
+            raise ValueError("layout_slot_map must contain numeric slot indices.")
+        if not np.isfinite(coerced).all():
+            raise ValueError("layout_slot_map must contain only finite values.")
+        if not np.all(np.equal(coerced, np.floor(coerced))):
+            raise ValueError("layout_slot_map values must be whole numbers.")
+
+    normalized = coerced.astype(np.int_, copy=False)
+    if np.any(normalized < 0):
+        raise ValueError("layout_slot_map values must be at least 0.")
+
+    unique_values = np.unique(normalized)
+    if unique_values.size == 0:
+        raise ValueError("layout_slot_map must contain at least 1 slot.")
+    expected = np.arange(unique_values.size, dtype=np.int_)
+    if not np.array_equal(unique_values, expected):
+        raise ValueError(
+            "layout_slot_map values must form a contiguous range starting at 0."
+        )
+
+    return normalized
+
+
+def _slot_count_from_explicit_slot_map(slot_map: npt.NDArray[np.int_]) -> int:
+    return int(np.max(slot_map)) + 1
+
+
 def _resolve_layout_slot_count(spec: TimesliceSpec) -> int:
     if spec.layout == "random":
         return _resolve_random_block_count(spec)
@@ -360,6 +400,30 @@ def build_timeslice_plan(
             num_images=len(images),
             spec=spec,
         )
+    if spec.layout == "slot_map":
+        if spec.layout_slot_map is None:
+            raise ValueError("layout_slot_map is required when layout='slot_map'.")
+        slot_map = _coerce_explicit_slot_map(
+            spec.layout_slot_map,
+            height=height,
+            width=width,
+        )
+        slot_count = _slot_count_from_explicit_slot_map(slot_map)
+        if spec.num_slices is not None and spec.num_slices != slot_count:
+            raise ValueError(
+                f"num_slices={spec.num_slices} does not match the "
+                f"{slot_count} slots present in layout_slot_map."
+            )
+        frame_indices = _build_frame_indices(
+            num_images=len(images),
+            num_slices=slot_count,
+            reverse_time=spec.reverse_time,
+        )
+        return TimeslicePlan(
+            layout="slot_map",
+            slice_map=slot_map,
+            slice_frame_indices=[int(frame_index) for frame_index in frame_indices],
+        )
 
     num_slices = spec.num_slices if spec.num_slices is not None else len(images)
 
@@ -434,6 +498,25 @@ def build_layout_plan(
                 num_blocks=num_blocks,
             ),
             slice_frame_indices=list(range(num_blocks)),
+        )
+    if spec.layout == "slot_map":
+        if spec.layout_slot_map is None:
+            raise ValueError("layout_slot_map is required when layout='slot_map'.")
+        slot_map = _coerce_explicit_slot_map(
+            spec.layout_slot_map,
+            height=height,
+            width=width,
+        )
+        slot_count = _slot_count_from_explicit_slot_map(slot_map)
+        if spec.num_slices is not None and spec.num_slices != slot_count:
+            raise ValueError(
+                f"num_slices={spec.num_slices} does not match the "
+                f"{slot_count} slots present in layout_slot_map."
+            )
+        return TimeslicePlan(
+            layout="slot_map",
+            slice_map=slot_map,
+            slice_frame_indices=list(range(slot_count)),
         )
 
     num_slices = _resolve_layout_slot_count(spec)

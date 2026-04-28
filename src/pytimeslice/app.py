@@ -65,6 +65,13 @@ def _manual_slot_count(spec: TimesliceSpec) -> int:
         raise ValueError(
             "Manual slot assignment is not currently supported for layout='random'."
         )
+    if spec.layout == "slot_map":
+        if spec.layout_slot_map is None:
+            raise ValueError(
+                "Manual slot assignment requires spec.layout_slot_map when "
+                "layout='slot_map'."
+            )
+        return spec.num_slices if spec.num_slices is not None else 1
     if spec.reverse_time:
         raise ValueError(
             "Manual slot assignment does not support reverse_time; provide slot "
@@ -179,6 +186,98 @@ def describe_layout(
             height=height,
         ),
         slots=_describe_slots(slot_map, slot_count=slot_count),
+    )
+
+
+def _slot_count_from_map(slot_map: np.ndarray) -> int:
+    return int(np.max(slot_map)) + 1
+
+
+def validate_slot_map(
+    slot_map: object,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    slot_count: int | None = None,
+) -> np.ndarray:
+    """Validate and normalize a client-edited slot map."""
+    raw_slot_map = np.asarray(slot_map)
+    if raw_slot_map.ndim != 2:
+        raise ValueError("slot_map must be a 2D array.")
+
+    resolved_height, resolved_width = raw_slot_map.shape
+    if width is not None and resolved_width != width:
+        raise ValueError(
+            f"slot_map width {resolved_width} does not match expected width {width}."
+        )
+    if height is not None and resolved_height != height:
+        raise ValueError(
+            f"slot_map height {resolved_height} does not match expected height "
+            f"{height}."
+        )
+
+    spec = TimesliceSpec(
+        layout="slot_map",
+        num_slices=slot_count,
+        layout_slot_map=raw_slot_map,
+    )
+    plan = build_layout_plan(
+        height=resolved_height,
+        width=resolved_width,
+        spec=spec,
+    )
+    return build_slot_map(
+        height=resolved_height,
+        width=resolved_width,
+        plan=plan,
+    )
+
+
+def import_slot_map(
+    slot_map: object,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    slot_count: int | None = None,
+    reverse_time: bool = False,
+) -> LayoutDescription:
+    """Build a layout description from a client-edited slot map."""
+    normalized_slot_map = validate_slot_map(
+        slot_map,
+        width=width,
+        height=height,
+        slot_count=slot_count,
+    )
+    resolved_slot_count = _slot_count_from_map(normalized_slot_map)
+    spec = TimesliceSpec(
+        layout="slot_map",
+        num_slices=resolved_slot_count,
+        reverse_time=reverse_time,
+        layout_slot_map=normalized_slot_map,
+    )
+    return describe_layout(
+        spec,
+        width=normalized_slot_map.shape[1],
+        height=normalized_slot_map.shape[0],
+    )
+
+
+def replace_layout_slot_map(
+    layout_description: LayoutDescription,
+    slot_map: object,
+    *,
+    reverse_time: bool | None = None,
+) -> LayoutDescription:
+    """Replace layout geometry with a validated client-edited slot map."""
+    return import_slot_map(
+        slot_map,
+        width=layout_description.width,
+        height=layout_description.height,
+        reverse_time=(
+            layout_description.spec.reverse_time
+            if reverse_time is None
+            else reverse_time
+        ),
     )
 
 
@@ -567,6 +666,16 @@ def _deserialize_spec(
             random_seed=random_seed,
             effects=effects,
         )
+    if layout == "slot_map":
+        return TimesliceSpec(
+            orientation=orientation,
+            layout=layout,
+            num_slices=num_slices if num_slices is not None else slot_count,
+            reverse_time=reverse_time,
+            random_seed=random_seed,
+            effects=effects,
+            layout_slot_map=slot_map.copy(),
+        )
     return TimesliceSpec(
         orientation=orientation,
         layout=layout,
@@ -740,6 +849,16 @@ def _materialize_manual_canvas(
     )
 
 
+def _validate_canvas_slot_index(
+    canvas: ManualTimesliceCanvas,
+    slot_index: int,
+) -> None:
+    if slot_index < 0 or slot_index >= canvas.slot_count:
+        raise IndexError(
+            f"slot_index={slot_index} is out of range for {canvas.slot_count} slots."
+        )
+
+
 def _slot_images_from_arrays(
     images: Sequence[RGBImage],
     *,
@@ -784,15 +903,39 @@ def create_manual_timeslice(
 ) -> ManualTimesliceCanvas:
     """Create an empty manual timeslice canvas for incremental slot assignment.
 
-    Manual assignment requires `spec.num_slices` because the library needs a
-    fixed number of addressable slots up front. Empty slots render as black in
-    the preview image until the caller assigns content.
+    Manual assignment requires either `spec.num_slices` or
+    `spec.layout_slot_map` because the library needs a fixed number of
+    addressable slots up front. Empty slots render as black in the preview
+    image until the caller assigns content.
     """
     _manual_slot_count(spec)
     layout_description = describe_layout(spec, width=width, height=height)
     return _materialize_manual_canvas(
         layout_description=layout_description,
         slot_images=[None] * layout_description.slot_count,
+    )
+
+
+def replace_canvas_slot_map(
+    canvas: ManualTimesliceCanvas,
+    slot_map: object,
+    *,
+    reverse_time: bool | None = None,
+) -> ManualTimesliceCanvas:
+    """Replace a manual canvas layout using a validated client-edited slot map."""
+    layout_description = replace_layout_slot_map(
+        canvas.layout_description,
+        slot_map,
+        reverse_time=reverse_time,
+    )
+    preserved_slot_images: list[RGBImage | None] = [
+        None
+    ] * layout_description.slot_count
+    for slot_index in range(min(canvas.slot_count, layout_description.slot_count)):
+        preserved_slot_images[slot_index] = canvas.slot_images[slot_index]
+    return _materialize_manual_canvas(
+        layout_description=layout_description,
+        slot_images=preserved_slot_images,
     )
 
 
@@ -804,10 +947,7 @@ def assign_image_to_slot(
     resize_mode: ResizeMode = "crop",
 ) -> ManualTimesliceCanvas:
     """Assign one in-memory image to a specific slot in a manual canvas."""
-    if slot_index < 0 or slot_index >= canvas.slot_count:
-        raise IndexError(
-            f"slot_index={slot_index} is out of range for {canvas.slot_count} slots."
-        )
+    _validate_canvas_slot_index(canvas, slot_index)
 
     normalized = normalize_rgb_image(
         image,
@@ -817,6 +957,29 @@ def assign_image_to_slot(
     )
     slot_images = list(canvas.slot_images)
     slot_images[slot_index] = normalized
+    return _materialize_manual_canvas(
+        layout_description=canvas.layout_description,
+        slot_images=slot_images,
+    )
+
+
+def assign_images_to_slots(
+    canvas: ManualTimesliceCanvas,
+    assignments: Mapping[int, RGBImage],
+    *,
+    resize_mode: ResizeMode = "crop",
+) -> ManualTimesliceCanvas:
+    """Assign multiple in-memory images into specific slots in one update."""
+    slot_images = list(canvas.slot_images)
+    for slot_index, image in assignments.items():
+        _validate_canvas_slot_index(canvas, slot_index)
+        slot_images[slot_index] = normalize_rgb_image(
+            image,
+            target_w=canvas.width,
+            target_h=canvas.height,
+            resize_mode=resize_mode,
+        )
+
     return _materialize_manual_canvas(
         layout_description=canvas.layout_description,
         slot_images=slot_images,
@@ -842,6 +1005,50 @@ def assign_path_to_slot(
         slot_index,
         image,
         resize_mode=resize_mode,
+    )
+
+
+def clear_slot(
+    canvas: ManualTimesliceCanvas,
+    slot_index: int,
+) -> ManualTimesliceCanvas:
+    """Clear one assigned slot back to an empty black region."""
+    return clear_slots(canvas, [slot_index])
+
+
+def clear_slots(
+    canvas: ManualTimesliceCanvas,
+    slot_indices: Sequence[int],
+) -> ManualTimesliceCanvas:
+    """Clear multiple assigned slots back to empty black regions."""
+    slot_images = list(canvas.slot_images)
+    for slot_index in slot_indices:
+        _validate_canvas_slot_index(canvas, slot_index)
+        slot_images[slot_index] = None
+
+    return _materialize_manual_canvas(
+        layout_description=canvas.layout_description,
+        slot_images=slot_images,
+    )
+
+
+def swap_slots(
+    canvas: ManualTimesliceCanvas,
+    left_slot_index: int,
+    right_slot_index: int,
+) -> ManualTimesliceCanvas:
+    """Swap the current contents of two slots."""
+    _validate_canvas_slot_index(canvas, left_slot_index)
+    _validate_canvas_slot_index(canvas, right_slot_index)
+
+    slot_images = list(canvas.slot_images)
+    slot_images[left_slot_index], slot_images[right_slot_index] = (
+        slot_images[right_slot_index],
+        slot_images[left_slot_index],
+    )
+    return _materialize_manual_canvas(
+        layout_description=canvas.layout_description,
+        slot_images=slot_images,
     )
 
 

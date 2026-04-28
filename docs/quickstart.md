@@ -161,6 +161,45 @@ saved_file = export_layout_json(layout, "./out/layout-metadata.json")
 loaded = import_layout_json(saved_file)
 ```
 
+Client-edited slot maps can be validated and applied to an existing manual
+canvas:
+
+```python
+import numpy as np
+
+from pytimeslice import (
+    assign_images_to_slots,
+    clear_slot,
+    create_manual_timeslice,
+    import_slot_map,
+    replace_canvas_slot_map,
+    swap_slots,
+    TimesliceSpec,
+    validate_slot_map,
+)
+
+edited_slot_map = validate_slot_map(
+    np.array(
+        [
+            [0, 0, 0, 2, 2, 1],
+            [0, 0, 0, 2, 2, 1],
+        ],
+        dtype=np.int_,
+    )
+)
+edited_layout = import_slot_map(edited_slot_map)
+
+canvas = create_manual_timeslice(
+    TimesliceSpec(orientation="vertical", num_slices=3),
+    width=6,
+    height=2,
+)
+canvas = replace_canvas_slot_map(canvas, edited_slot_map)
+canvas = swap_slots(canvas, 0, 2)
+canvas = clear_slot(canvas, 1)
+canvas = assign_images_to_slots(canvas, {1: replacement_frame})
+```
+
 ## CLI
 
 ```sh
