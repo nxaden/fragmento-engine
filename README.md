@@ -108,22 +108,26 @@ saved = render_folder_to_file(
 print(saved.output_file)
 ```
 
-To render a random-layout animated GIF:
+To render an animation export through the unified API:
 
 ```python
 from pathlib import Path
 
-from pytimeslice import TimesliceSpec, render_random_gif
+from pytimeslice import TimesliceSpec, render_animation
 
-animated = render_random_gif(
+animated = render_animation(
     input_folder=Path("./frames"),
+    output_file=Path("./out/random-shuffle.gif"),
     spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    mode="random",
+    output_format="gif",
     frame_count=8,
     frame_duration_ms=180,
+    loops=2,
     smooth_loop=True,
 )
 
-print(animated.emitted_seeds)
+print(animated.emitted_values)
 print(animated.output_file)
 ```
 
@@ -132,21 +136,27 @@ To render a video export, `ffmpeg` must be available on `PATH`:
 ```python
 from pathlib import Path
 
-from pytimeslice import TimesliceSpec, render_random_video
+from pytimeslice import TimesliceSpec, render_animation
 
-video = render_random_video(
+video = render_animation(
     input_folder=Path("./frames"),
     output_file=Path("./out/random-shuffle.mov"),
     spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    mode="random",
+    output_format="mov",
     frame_count=8,
     fps=12,
     loops=2,
     smooth_loop=True,
 )
 
-print(video.emitted_seeds)
+print(video.emitted_values)
 print(video.output_file)
 ```
+
+The older `render_progression_gif(...)`, `render_random_gif(...)`,
+`render_progression_video(...)`, and `render_random_video(...)` helpers remain
+available as compatibility wrappers around the same animation service.
 
 Mask-based layouts are available from the Python API:
 
@@ -186,6 +196,25 @@ custom = render_images(
 Manual slot assignment is also available for future UI flows where the caller
 chooses exactly which image belongs in each slice. This requires
 `spec.num_slices` to be set explicitly.
+
+Layout metadata for a future client can be described without rendering any user
+content:
+
+```python
+from pytimeslice import TimesliceSpec, describe_layout
+
+layout = describe_layout(
+    TimesliceSpec(layout="diagonal", num_slices=5),
+    width=3840,
+    height=2160,
+)
+
+print(layout.slot_count)
+print(layout.slots[0].bounds)
+print(layout.mask_for_slot(0).shape)
+
+slot_preview = layout.render_slot_preview(0)
+```
 
 One-shot render from an explicit list of paths:
 
@@ -227,13 +256,16 @@ canvas = assign_image_to_slot(canvas, 0, first_frame)
 canvas = assign_image_to_slot(canvas, 1, second_frame)
 
 preview = canvas.image
+slot_map = canvas.layout_description.slot_map
 print(canvas.filled_slot_indices)  # [0, 1]
 print(canvas.is_complete)  # False until every slot is assigned
 ```
 
 Empty slots render as black in the preview image, which makes the incremental
 canvas suitable for a client that wants to show progress while the user fills
-each slice manually.
+each slice manually. `canvas.layout_description` reuses the same layout
+metadata returned by `describe_layout(...)`, so a client can initialize the
+geometry once and then keep filling slots against that stable slot map.
 
 ## CLI Usage
 
@@ -332,10 +364,13 @@ pytimeslice ./frames ./out/random-shuffle.gif \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-gif \
-  --random-gif-frames 8 \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180
+  --animate \
+  --animation-mode random \
+  --animation-format gif \
+  --animation-frame-count 8 \
+  --animation-frame-duration-ms 180 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 Render a random-layout video export by advancing the random seed each frame:
@@ -345,26 +380,32 @@ pytimeslice ./frames ./out/random-shuffle.mov \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-video \
-  --random-video-frames 8 \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop
+  --animate \
+  --animation-mode random \
+  --animation-format mov \
+  --animation-frame-count 8 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 Render a progression video export:
 
 ```sh
 pytimeslice ./frames ./out/progression.mp4 \
-  --progression-video \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop \
+  --animate \
+  --animation-mode progression \
+  --animation-format mp4 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop \
   --orientation vertical
 ```
 
 Video exports require `ffmpeg` on `PATH` and support `.mp4` or `.mov` output
-paths.
+paths. The legacy `--progression-gif`, `--random-gif`, `--progression-video`,
+and `--random-video` flags still work, but `--animate` is the preferred CLI
+entrypoint.
 
 More CLI recipes, including overlay practice commands, live in
 [the hosted docs](https://nxaden.github.io/pytimeslice/USAGE_EXAMPLES/).

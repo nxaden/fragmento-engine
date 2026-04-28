@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -12,17 +14,25 @@ from PIL import Image
 from pytimeslice import (
     assign_path_to_slot,
     create_manual_timeslice,
+    render_animation,
     render_assigned_paths,
     render_folder_to_file,
-    render_progression_gif,
-    render_progression_video,
-    render_random_gif,
-    render_random_video,
 )
 from pytimeslice import SliceEffects, TimesliceSpec
 from pytimeslice.app import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from pytimeslice.domain.models import validate_timeslice_spec
 from pytimeslice.infrastructure.image_writer import PILImageWriter
+
+
+@dataclass(frozen=True)
+class _AnimationOptions:
+    mode: Literal["progression", "random"]
+    output_format: Literal["gif", "mp4", "mov"]
+    frame_count: int
+    frame_duration_ms: int
+    fps: int
+    loops: int
+    smooth_loop: bool
 
 
 def _parse_non_negative_int(value: str) -> int:
@@ -137,6 +147,123 @@ def _manual_mode_requested(args: argparse.Namespace) -> bool:
     return bool(args.assigned_paths or args.slot_paths or args.manual_empty)
 
 
+def _animation_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        args.animate
+        or args.progression_gif
+        or args.random_gif
+        or args.progression_video
+        or args.random_video
+    )
+
+
+def _resolve_animation_output_format(
+    *,
+    output_file: Path | None,
+    requested_format: str | None,
+    parser: argparse.ArgumentParser,
+) -> Literal["gif", "mp4", "mov"]:
+    if (
+        output_file is not None
+        and output_file.suffix
+        and output_file.suffix.lower() not in {".gif", ".mp4", ".mov"}
+    ):
+        parser.error(
+            "Animation output files must use the .gif, .mp4, or .mov extension."
+        )
+
+    suffix_format = output_file.suffix.lower().removeprefix(".") if output_file else ""
+    if suffix_format and requested_format and suffix_format != requested_format:
+        parser.error("--animation-format does not match the output_file extension.")
+
+    if requested_format is not None:
+        return cast(Literal["gif", "mp4", "mov"], requested_format)
+    if suffix_format == "mp4":
+        return "mp4"
+    if suffix_format == "mov":
+        return "mov"
+    return "gif"
+
+
+def _resolve_animation_options(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> _AnimationOptions | None:
+    legacy_modes = [
+        args.progression_gif,
+        args.random_gif,
+        args.progression_video,
+        args.random_video,
+    ]
+    if sum(1 for enabled in legacy_modes if enabled) + int(args.animate) > 1:
+        parser.error("Only one animation export mode can be selected at a time.")
+
+    if args.progression_gif:
+        return _AnimationOptions(
+            mode="progression",
+            output_format="gif",
+            frame_count=args.animation_frame_count,
+            frame_duration_ms=args.gif_frame_duration_ms,
+            fps=args.animation_fps,
+            loops=1,
+            smooth_loop=args.gif_smooth_loop,
+        )
+    if args.random_gif:
+        return _AnimationOptions(
+            mode="random",
+            output_format="gif",
+            frame_count=args.random_gif_frames,
+            frame_duration_ms=args.gif_frame_duration_ms,
+            fps=args.animation_fps,
+            loops=1,
+            smooth_loop=args.gif_smooth_loop,
+        )
+    if args.progression_video:
+        return _AnimationOptions(
+            mode="progression",
+            output_format=_resolve_animation_output_format(
+                output_file=args.output_file,
+                requested_format=None,
+                parser=parser,
+            ),
+            frame_count=args.animation_frame_count,
+            frame_duration_ms=args.animation_frame_duration_ms,
+            fps=args.video_fps,
+            loops=args.video_loops,
+            smooth_loop=args.gif_smooth_loop,
+        )
+    if args.random_video:
+        return _AnimationOptions(
+            mode="random",
+            output_format=_resolve_animation_output_format(
+                output_file=args.output_file,
+                requested_format=None,
+                parser=parser,
+            ),
+            frame_count=args.random_video_frames,
+            frame_duration_ms=args.animation_frame_duration_ms,
+            fps=args.video_fps,
+            loops=args.video_loops,
+            smooth_loop=args.gif_smooth_loop,
+        )
+    if not args.animate:
+        return None
+
+    return _AnimationOptions(
+        mode=args.animation_mode,
+        output_format=_resolve_animation_output_format(
+            output_file=args.output_file,
+            requested_format=args.animation_format,
+            parser=parser,
+        ),
+        frame_count=args.animation_frame_count,
+        frame_duration_ms=args.animation_frame_duration_ms,
+        fps=args.animation_fps,
+        loops=args.animation_loops,
+        smooth_loop=args.animation_smooth_loop or args.gif_smooth_loop,
+    )
+
+
 def _resolve_manual_output_file(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
@@ -189,14 +316,8 @@ def _render_manual_assignment(
     parser: argparse.ArgumentParser,
     spec: TimesliceSpec,
 ) -> None:
-    if args.progression_gif:
-        parser.error("Progression GIF is not supported with manual assignment mode.")
-    if args.random_gif:
-        parser.error("Random GIF is not supported with manual assignment mode.")
-    if args.progression_video:
-        parser.error("Progression video is not supported with manual assignment mode.")
-    if args.random_video:
-        parser.error("Random video is not supported with manual assignment mode.")
+    if _animation_requested(args):
+        parser.error("Animation export is not supported with manual assignment mode.")
     if args.assigned_paths and args.slot_paths:
         parser.error("--assigned-path cannot be combined with --slot-path.")
     if args.manual_empty and (args.assigned_paths or args.slot_paths):
@@ -461,6 +582,56 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Use a ping-pong sequence for animated GIF and video outputs."),
     )
     parser.add_argument(
+        "--animate",
+        action="store_true",
+        help="Render a unified animation export through the shared animation API.",
+    )
+    parser.add_argument(
+        "--animation-mode",
+        choices=["progression", "random"],
+        default="progression",
+        help="Animation strategy for --animate.",
+    )
+    parser.add_argument(
+        "--animation-format",
+        choices=["gif", "mp4", "mov"],
+        default=None,
+        help="Encoded output format for --animate. Defaults to output suffix or gif.",
+    )
+    parser.add_argument(
+        "--animation-frame-count",
+        type=_parse_positive_int,
+        default=8,
+        metavar="COUNT",
+        help="Forward keyframe count for --animate mode=random.",
+    )
+    parser.add_argument(
+        "--animation-frame-duration-ms",
+        type=_parse_positive_int,
+        default=250,
+        metavar="MS",
+        help="Per-frame duration for --animate when exporting GIF.",
+    )
+    parser.add_argument(
+        "--animation-fps",
+        type=_parse_positive_int,
+        default=6,
+        metavar="FPS",
+        help="Playback rate for --animate when exporting video.",
+    )
+    parser.add_argument(
+        "--animation-loops",
+        type=_parse_positive_int,
+        default=1,
+        metavar="COUNT",
+        help="Repeat the emitted animation sequence this many times for --animate.",
+    )
+    parser.add_argument(
+        "--animation-smooth-loop",
+        action="store_true",
+        help="Use a ping-pong sequence for --animate outputs.",
+    )
+    parser.add_argument(
         "--video-fps",
         type=_parse_positive_int,
         default=6,
@@ -563,94 +734,45 @@ def main() -> None:
 
     if args.input_folder is None:
         parser.error("input_folder is required unless manual assignment mode is used.")
-    animation_modes = [
-        args.progression_gif,
-        args.random_gif,
-        args.progression_video,
-        args.random_video,
-    ]
-    if sum(1 for enabled in animation_modes if enabled) > 1:
-        parser.error("Only one animation export mode can be selected at a time.")
-    if args.progression_gif and spec.layout == "random":
-        parser.error("Progression GIF is not currently supported with --layout random.")
-    if args.random_gif and spec.layout != "random":
-        parser.error("Random GIF currently requires --layout random.")
-    if args.progression_video and spec.layout == "random":
-        parser.error(
-            "Progression video is not currently supported with --layout random."
-        )
-    if args.random_video and spec.layout != "random":
-        parser.error("Random video currently requires --layout random.")
+    animation_options = _resolve_animation_options(args, parser)
+    if animation_options is not None:
+        if animation_options.mode == "progression" and spec.layout == "random":
+            parser.error(
+                "Progression animation is not currently supported with --layout random."
+            )
+        if animation_options.mode == "random" and spec.layout != "random":
+            parser.error("Random animation currently requires --layout random.")
 
-    if args.progression_gif:
-        progression_response = render_progression_gif(
+        animation_response = render_animation(
             input_folder=args.input_folder,
             output_file=args.output_file,
             spec=spec,
             resize_mode=args.resize_mode,
-            frame_duration_ms=args.gif_frame_duration_ms,
-            smooth_loop=args.gif_smooth_loop,
+            mode=animation_options.mode,
+            output_format=animation_options.output_format,
+            frame_duration_ms=animation_options.frame_duration_ms,
+            fps=animation_options.fps,
+            loops=animation_options.loops,
+            smooth_loop=animation_options.smooth_loop,
+            frame_count=animation_options.frame_count,
         )
-        print(f"Rendered using {len(progression_response.input_paths)} images.")
-        counts = ", ".join(
-            str(count) for count in progression_response.emitted_slice_counts
-        )
-        print(f"Slice counts: {counts}")
-        print(f"Saved: {progression_response.output_file}")
-    elif args.random_gif:
-        random_gif_response = render_random_gif(
-            input_folder=args.input_folder,
-            output_file=args.output_file,
-            spec=spec,
-            resize_mode=args.resize_mode,
-            frame_duration_ms=args.gif_frame_duration_ms,
-            frame_count=args.random_gif_frames,
-            smooth_loop=args.gif_smooth_loop,
-        )
-        print(f"Rendered using {len(random_gif_response.input_paths)} images.")
-        seeds = ", ".join(str(seed) for seed in random_gif_response.emitted_seeds)
-        print(f"Seeds: {seeds}")
-        print(f"Saved: {random_gif_response.output_file}")
-    elif args.progression_video:
-        progression_video_response = render_progression_video(
-            input_folder=args.input_folder,
-            output_file=args.output_file,
-            spec=spec,
-            resize_mode=args.resize_mode,
-            fps=args.video_fps,
-            loops=args.video_loops,
-            smooth_loop=args.gif_smooth_loop,
-        )
-        print(f"Rendered using {len(progression_video_response.input_paths)} images.")
-        counts = ", ".join(
-            str(count) for count in progression_video_response.emitted_slice_counts
-        )
-        print(f"Slice counts: {counts}")
-        print(f"Saved: {progression_video_response.output_file}")
-    elif args.random_video:
-        random_video_response = render_random_video(
-            input_folder=args.input_folder,
-            output_file=args.output_file,
-            spec=spec,
-            resize_mode=args.resize_mode,
-            fps=args.video_fps,
-            loops=args.video_loops,
-            frame_count=args.random_video_frames,
-            smooth_loop=args.gif_smooth_loop,
-        )
-        print(f"Rendered using {len(random_video_response.input_paths)} images.")
-        seeds = ", ".join(str(seed) for seed in random_video_response.emitted_seeds)
-        print(f"Seeds: {seeds}")
-        print(f"Saved: {random_video_response.output_file}")
-    else:
-        image_response = render_folder_to_file(
-            input_folder=args.input_folder,
-            output_file=args.output_file,
-            spec=spec,
-            resize_mode=args.resize_mode,
-        )
-        print(f"Rendered using {len(image_response.input_paths)} images.")
-        print(f"Saved: {image_response.output_file}")
+        print(f"Rendered using {len(animation_response.input_paths)} images.")
+        values = ", ".join(str(value) for value in animation_response.emitted_values)
+        if animation_response.value_kind == "slice_count":
+            print(f"Slice counts: {values}")
+        else:
+            print(f"Seeds: {values}")
+        print(f"Saved: {animation_response.output_file}")
+        return
+
+    image_response = render_folder_to_file(
+        input_folder=args.input_folder,
+        output_file=args.output_file,
+        spec=spec,
+        resize_mode=args.resize_mode,
+    )
+    print(f"Rendered using {len(image_response.input_paths)} images.")
+    print(f"Saved: {image_response.output_file}")
 
 
 if __name__ == "__main__":

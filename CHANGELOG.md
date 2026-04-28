@@ -22,6 +22,9 @@ releases begin.
 - Manual slot-assignment helpers for future client flows, including explicit
   per-slice path/image rendering and an incremental empty-canvas builder that
   defaults to 4K previews.
+- Client-facing layout metadata through `describe_layout(...)`, including
+  slot maps, per-slot bounds, color-coded preview images, and shared metadata
+  on manual canvases.
 - CLI support for manual assignment with `--assigned-path`, `--slot-path`, and
   `--manual-empty`, including partial black-slot previews and configurable
   manual canvas dimensions.
@@ -30,12 +33,18 @@ releases begin.
   smooth-loop emission.
 - `.mp4` and `.mov` animation export support for progression and random-shuffle
   workflows, including configurable video frame rates and repeat counts.
+- A unified `render_animation(...)` API plus `--animate` CLI workflow for GIF,
+  `.mp4`, and `.mov` exports across both progression and random animation
+  modes.
 
 ### Changed
 
 - Archived low-value legacy docs and retired standalone requirements into the
   local `.archive/` folder, and simplified the active MkDocs navigation to the
   generated `docs/api/` pages.
+- Refactored the separate GIF and video export paths onto one shared animation
+  service while keeping the older helper functions and CLI flags as
+  compatibility wrappers.
 
 ## [2026-04-27]
 

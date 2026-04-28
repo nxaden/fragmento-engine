@@ -38,18 +38,22 @@ saved = render_folder_to_file(Path("./frames"))
 print(saved.output_file)
 ```
 
-To render a random-layout animated GIF:
+To render an animation export through the unified API:
 
 ```python
 from pathlib import Path
 
-from pytimeslice import TimesliceSpec, render_random_gif
+from pytimeslice import TimesliceSpec, render_animation
 
-animated = render_random_gif(
+animated = render_animation(
     input_folder=Path("./frames"),
+    output_file=Path("./out/random-shuffle.gif"),
     spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    mode="random",
+    output_format="gif",
     frame_count=8,
     frame_duration_ms=180,
+    loops=2,
     smooth_loop=True,
 )
 ```
@@ -59,18 +63,24 @@ To render a video export, `ffmpeg` must be available on `PATH`:
 ```python
 from pathlib import Path
 
-from pytimeslice import TimesliceSpec, render_random_video
+from pytimeslice import TimesliceSpec, render_animation
 
-video = render_random_video(
+video = render_animation(
     input_folder=Path("./frames"),
-    output_file=Path("./out/random-shuffle.mp4"),
+    output_file=Path("./out/random-shuffle.mov"),
     spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    mode="random",
+    output_format="mov",
     frame_count=8,
     fps=12,
     loops=2,
     smooth_loop=True,
 )
 ```
+
+The older `render_progression_gif(...)`, `render_random_gif(...)`,
+`render_progression_video(...)`, and `render_random_video(...)` helpers remain
+available as compatibility wrappers.
 
 Built-in mask layouts are also available from the Python API:
 
@@ -98,10 +108,12 @@ from pytimeslice import (
     TimesliceSpec,
     assign_image_to_slot,
     create_manual_timeslice,
+    describe_layout,
     render_assigned_paths,
 )
 
 spec = TimesliceSpec(orientation="horizontal", num_slices=5)
+layout = describe_layout(spec, width=3840, height=2160)
 
 final_canvas = render_assigned_paths(
     paths=[
@@ -118,12 +130,17 @@ builder = create_manual_timeslice(spec)  # defaults to 3840x2160
 builder = assign_image_to_slot(builder, 0, first_frame)
 builder = assign_image_to_slot(builder, 1, second_frame)
 
+print(layout.slots[0].bounds)
+print(layout.mask_for_slot(0).shape)
 print(final_canvas.is_complete)
 print(builder.filled_slot_indices)
+print(builder.layout_description.slot_count)
 ```
 
 For manual assignment, `spec.num_slices` must be set explicitly. Unfilled slots
-render as black in the preview image.
+render as black in the preview image. `describe_layout(...)` exposes the stable
+slot map, per-slot bounds, and a color-coded preview image that a future client
+can use before any slot content is assigned.
 
 ## CLI
 
@@ -134,13 +151,16 @@ pytimeslice ./frames --orientation vertical --slices 20
 If no output path is provided, `pytimeslice` writes a timestamped file into an
 `out/` folder next to the input folder.
 
-Progression GIF example:
+Unified animation CLI example:
 
 ```sh
 pytimeslice ./frames \
-  --progression-gif \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180 \
+  --animate \
+  --animation-mode progression \
+  --animation-format gif \
+  --animation-frame-duration-ms 180 \
+  --animation-loops 2 \
+  --animation-smooth-loop \
   --orientation vertical
 ```
 
@@ -185,10 +205,13 @@ pytimeslice ./frames ./out/random-shuffle.gif \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-gif \
-  --random-gif-frames 8 \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180
+  --animate \
+  --animation-mode random \
+  --animation-format gif \
+  --animation-frame-count 8 \
+  --animation-frame-duration-ms 180 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 Random-layout video export:
@@ -198,23 +221,30 @@ pytimeslice ./frames ./out/random-shuffle.mov \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-video \
-  --random-video-frames 8 \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop
+  --animate \
+  --animation-mode random \
+  --animation-format mov \
+  --animation-frame-count 8 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 Progression video export:
 
 ```sh
 pytimeslice ./frames ./out/progression.mp4 \
-  --progression-video \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop \
+  --animate \
+  --animation-mode progression \
+  --animation-format mp4 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop \
   --orientation vertical
 ```
+
+The legacy animation flags still work, but `--animate` is the preferred CLI
+entrypoint.
 
 In manual mode, the first positional path is the output file. Unassigned slots
 render as black, and the manual canvas defaults to 3840x2160 unless you pass

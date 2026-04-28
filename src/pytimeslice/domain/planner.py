@@ -37,6 +37,11 @@ def _validate_images(images: Sequence[RGBImage]) -> tuple[int, int, int]:
     return height, width, channels
 
 
+def _validate_dimensions(*, height: int, width: int) -> None:
+    if height < 1 or width < 1:
+        raise ValueError("height and width must both be greater than 0.")
+
+
 def _build_frame_indices(
     num_images: int,
     num_slices: int,
@@ -145,6 +150,16 @@ def _build_circular_layout_mask(height: int, width: int) -> npt.NDArray[np.float
 
 def _resolve_random_block_count(spec: TimesliceSpec) -> int:
     return spec.num_blocks if spec.num_blocks is not None else 4
+
+
+def _resolve_layout_slot_count(spec: TimesliceSpec) -> int:
+    if spec.layout == "random":
+        return _resolve_random_block_count(spec)
+    if spec.num_slices is None:
+        raise ValueError(
+            "spec.num_slices must be explicitly set when describing a layout."
+        )
+    return spec.num_slices
 
 
 def _largest_power_of_two_at_least_two(limit: int) -> int:
@@ -391,3 +406,95 @@ def build_timeslice_plan(
         slice_map=slice_map,
         slice_frame_indices=[int(frame_index) for frame_index in frame_indices],
     )
+
+
+def build_layout_plan(
+    *,
+    height: int,
+    width: int,
+    spec: TimesliceSpec,
+) -> TimeslicePlan:
+    """Build a slot-addressable layout plan without source-frame assignment."""
+    validate_timeslice_spec(spec)
+    _validate_dimensions(height=height, width=width)
+
+    if spec.layout == "random":
+        num_blocks = _resolve_random_block_count(spec)
+        max_blocks = max_supported_slices(height=height, width=width, spec=spec)
+        if num_blocks > max_blocks:
+            raise ValueError(
+                f"num_blocks={num_blocks} exceeds available block capacity "
+                f"({max_blocks}) for layout='random'."
+            )
+        return TimeslicePlan(
+            layout="random",
+            slice_map=_build_random_block_map(
+                height=height,
+                width=width,
+                num_blocks=num_blocks,
+            ),
+            slice_frame_indices=list(range(num_blocks)),
+        )
+
+    num_slices = _resolve_layout_slot_count(spec)
+    max_slices = max_supported_slices(height=height, width=width, spec=spec)
+    if num_slices > max_slices:
+        if spec.layout == "bands":
+            raise ValueError(
+                f"num_slices={num_slices} exceeds available pixel span ({max_slices}) "
+                f"for orientation={spec.orientation!r}."
+            )
+        raise ValueError(
+            f"num_slices={num_slices} exceeds available pixel capacity "
+            f"({max_slices}) for layout={spec.layout!r}."
+        )
+
+    slot_indices = np.arange(num_slices, dtype=np.int_)
+    if spec.layout == "bands":
+        span = width if spec.orientation == "vertical" else height
+        return _build_band_plan(
+            spec=spec,
+            span=span,
+            frame_indices=slot_indices,
+            num_slices=num_slices,
+        )
+
+    layout_mask = _resolve_layout_mask(
+        height=height,
+        width=width,
+        spec=spec,
+        num_slices=num_slices,
+    )
+    if spec.layout == "circular":
+        slice_map = _build_grouped_slice_map(layout_mask, num_slices=num_slices)
+    else:
+        slice_map = _build_slice_map(layout_mask, num_slices=num_slices)
+
+    return TimeslicePlan(
+        layout=spec.layout,
+        slice_map=slice_map,
+        slice_frame_indices=list(range(num_slices)),
+    )
+
+
+def build_slot_map(
+    *,
+    height: int,
+    width: int,
+    plan: TimeslicePlan,
+) -> npt.NDArray[np.int_]:
+    """Return a dense slot-index map for a layout plan."""
+    _validate_dimensions(height=height, width=width)
+
+    if plan.layout == "bands":
+        slot_map = np.empty((height, width), dtype=np.int_)
+        for slot_index, band in enumerate(plan.bands):
+            if plan.orientation == "vertical":
+                slot_map[:, band.start : band.end] = slot_index
+            else:
+                slot_map[band.start : band.end, :] = slot_index
+        return slot_map
+
+    if plan.slice_map is None:
+        raise ValueError("Mask-based plans must define slice_map.")
+    return plan.slice_map.copy()

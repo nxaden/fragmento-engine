@@ -176,6 +176,71 @@ class TimeslicePlan:
 
 
 @dataclass(frozen=True)
+class LayoutBounds:
+    """Pixel-space bounding box for one addressable layout slot."""
+
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+    @property
+    def width(self) -> int:
+        return self.right - self.left
+
+    @property
+    def height(self) -> int:
+        return self.bottom - self.top
+
+
+@dataclass(frozen=True)
+class LayoutSlot:
+    """Client-facing metadata for one slot in a layout description."""
+
+    index: int
+    bounds: LayoutBounds
+    pixel_count: int
+
+
+@dataclass(frozen=True)
+class LayoutDescription:
+    """Pure layout metadata for client-driven composition flows."""
+
+    spec: TimesliceSpec
+    plan: TimeslicePlan
+    width: int
+    height: int
+    slot_count: int
+    slot_map: npt.NDArray[np.int_]
+    preview_image: RGBImage
+    slots: list[LayoutSlot]
+
+    def mask_for_slot(self, slot_index: int) -> npt.NDArray[np.bool_]:
+        """Return a boolean pixel mask for one slot."""
+        if slot_index < 0 or slot_index >= self.slot_count:
+            raise IndexError(
+                f"slot_index={slot_index} is out of range for {self.slot_count} slots."
+            )
+        return self.slot_map == slot_index
+
+    def render_slot_preview(
+        self,
+        slot_index: int,
+        *,
+        inactive_opacity: float = 0.18,
+    ) -> RGBImage:
+        """Return a preview image with one slot emphasized."""
+        if not 0.0 <= inactive_opacity <= 1.0:
+            raise ValueError("inactive_opacity must be between 0.0 and 1.0.")
+
+        slot_mask = self.mask_for_slot(slot_index)
+        preview = np.rint(self.preview_image.astype(np.float32) * inactive_opacity)
+        highlighted = preview.astype(np.uint8)
+        highlighted[slot_mask] = self.preview_image[slot_mask]
+        return highlighted
+
+
+@dataclass(frozen=True)
 class CompositeResult:
     """CompositeResult is the final output plus traceable metadata."""
 

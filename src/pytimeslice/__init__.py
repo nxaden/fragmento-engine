@@ -6,6 +6,8 @@ from pytimeslice.app import (
     assign_image_to_slot,
     assign_path_to_slot,
     create_manual_timeslice,
+    describe_layout,
+    render_animation,
     render_folder,
     render_folder_to_file,
     render_assigned_images,
@@ -17,7 +19,13 @@ from pytimeslice.app import (
     render_random_video,
 )
 from pytimeslice.application.services import ManualTimesliceCanvas
-from pytimeslice.domain.models import SliceEffects, TimesliceSpec
+from pytimeslice.domain.models import (
+    LayoutBounds,
+    LayoutDescription,
+    LayoutSlot,
+    SliceEffects,
+    TimesliceSpec,
+)
 
 try:
     __version__ = version("pytimeslice")
@@ -29,7 +37,12 @@ __all__ = [
     "assign_image_to_slot",
     "assign_path_to_slot",
     "create_manual_timeslice",
+    "describe_layout",
+    "LayoutBounds",
+    "LayoutDescription",
+    "LayoutSlot",
     "ManualTimesliceCanvas",
+    "render_animation",
     "render_folder",
     "render_folder_to_file",
     "render_assigned_images",

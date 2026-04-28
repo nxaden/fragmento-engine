@@ -6,6 +6,9 @@ from typing import Sequence
 import numpy as np
 
 from pytimeslice.application.services import (
+    AnimationFormat,
+    AnimationMode,
+    AnimationRenderResponse,
     ManualTimesliceCanvas,
     ProgressionGifRenderResponse,
     ProgressionVideoRenderResponse,
@@ -16,8 +19,14 @@ from pytimeslice.application.services import (
     RenderTimesliceService,
 )
 from pytimeslice.domain.compositor import apply_timeslice_plan
-from pytimeslice.domain.models import RGBImage, TimeslicePlan, TimesliceSpec
-from pytimeslice.domain.planner import build_timeslice_plan
+from pytimeslice.domain.models import (
+    LayoutBounds,
+    LayoutDescription,
+    LayoutSlot,
+    RGBImage,
+    TimesliceSpec,
+)
+from pytimeslice.domain.planner import build_layout_plan, build_slot_map
 from pytimeslice.infrastructure.image_loader import (
     PILImageSequenceLoader,
     load_image_to_size,
@@ -59,26 +68,101 @@ def _empty_rgb_image(*, width: int, height: int) -> RGBImage:
     return np.zeros((height, width, 3), dtype=np.uint8)
 
 
-def _manual_plan(
+def _preview_color(slot_index: int) -> tuple[int, int, int]:
+    return (
+        48 + ((slot_index * 73) % 176),
+        48 + ((slot_index * 131) % 176),
+        48 + ((slot_index * 47) % 176),
+    )
+
+
+def _solid_color_image(
+    color: tuple[int, int, int],
     *,
-    spec: TimesliceSpec,
     width: int,
     height: int,
+) -> RGBImage:
+    image = np.empty((height, width, 3), dtype=np.uint8)
+    image[:, :, 0] = color[0]
+    image[:, :, 1] = color[1]
+    image[:, :, 2] = color[2]
+    return image
+
+
+def _slot_preview_images(
+    *,
     slot_count: int,
-) -> TimeslicePlan:
-    placeholder = _empty_rgb_image(width=width, height=height)
-    return build_timeslice_plan(images=[placeholder] * slot_count, spec=spec)
+    width: int,
+    height: int,
+) -> list[RGBImage]:
+    return [
+        _solid_color_image(_preview_color(slot_index), width=width, height=height)
+        for slot_index in range(slot_count)
+    ]
+
+
+def _describe_slots(slot_map: np.ndarray, *, slot_count: int) -> list[LayoutSlot]:
+    slots: list[LayoutSlot] = []
+    for slot_index in range(slot_count):
+        row_indices, col_indices = np.nonzero(slot_map == slot_index)
+        if row_indices.size == 0 or col_indices.size == 0:
+            raise ValueError(f"slot_index={slot_index} does not occupy any pixels.")
+        slots.append(
+            LayoutSlot(
+                index=slot_index,
+                bounds=LayoutBounds(
+                    left=int(col_indices.min()),
+                    top=int(row_indices.min()),
+                    right=int(col_indices.max()) + 1,
+                    bottom=int(row_indices.max()) + 1,
+                ),
+                pixel_count=int(row_indices.size),
+            )
+        )
+    return slots
+
+
+def describe_layout(
+    spec: TimesliceSpec,
+    *,
+    width: int = DEFAULT_CANVAS_WIDTH,
+    height: int = DEFAULT_CANVAS_HEIGHT,
+) -> LayoutDescription:
+    """Describe a layout for client-driven preview and assignment workflows."""
+    plan = build_layout_plan(height=height, width=width, spec=spec)
+    slot_map = build_slot_map(height=height, width=width, plan=plan)
+    slot_count = (
+        len(plan.bands)
+        if plan.layout == "bands"
+        else len(plan.slice_frame_indices or [])
+    )
+    preview_images = _slot_preview_images(
+        slot_count=slot_count,
+        width=width,
+        height=height,
+    )
+    preview = apply_timeslice_plan(images=preview_images, plan=plan)
+    return LayoutDescription(
+        spec=spec,
+        plan=plan,
+        width=width,
+        height=height,
+        slot_count=slot_count,
+        slot_map=slot_map,
+        preview_image=preview.image,
+        slots=_describe_slots(slot_map, slot_count=slot_count),
+    )
 
 
 def _materialize_manual_canvas(
     *,
-    spec: TimesliceSpec,
-    plan: TimeslicePlan,
-    width: int,
-    height: int,
+    layout_description: LayoutDescription,
     slot_images: Sequence[RGBImage | None],
 ) -> ManualTimesliceCanvas:
-    placeholder = _empty_rgb_image(width=width, height=height)
+    placeholder = _empty_rgb_image(
+        width=layout_description.width,
+        height=layout_description.height,
+    )
     filled_slot_indices = [
         slot_index
         for slot_index, slot_image in enumerate(slot_images)
@@ -90,14 +174,15 @@ def _materialize_manual_canvas(
     ]
     composite = apply_timeslice_plan(
         images=render_images,
-        plan=plan,
-        effects=spec.effects,
+        plan=layout_description.plan,
+        effects=layout_description.spec.effects,
     )
     return ManualTimesliceCanvas(
-        spec=spec,
-        plan=plan,
-        width=width,
-        height=height,
+        layout_description=layout_description,
+        spec=layout_description.spec,
+        plan=layout_description.plan,
+        width=layout_description.width,
+        height=layout_description.height,
         slot_count=len(slot_images),
         slot_images=list(slot_images),
         image=composite.image,
@@ -153,22 +238,11 @@ def create_manual_timeslice(
     fixed number of addressable slots up front. Empty slots render as black in
     the preview image until the caller assigns content.
     """
-    if width < 1 or height < 1:
-        raise ValueError("width and height must be greater than 0.")
-
-    slot_count = _manual_slot_count(spec)
-    plan = _manual_plan(
-        spec=spec,
-        width=width,
-        height=height,
-        slot_count=slot_count,
-    )
+    _manual_slot_count(spec)
+    layout_description = describe_layout(spec, width=width, height=height)
     return _materialize_manual_canvas(
-        spec=spec,
-        plan=plan,
-        width=width,
-        height=height,
-        slot_images=[None] * slot_count,
+        layout_description=layout_description,
+        slot_images=[None] * layout_description.slot_count,
     )
 
 
@@ -194,10 +268,7 @@ def assign_image_to_slot(
     slot_images = list(canvas.slot_images)
     slot_images[slot_index] = normalized
     return _materialize_manual_canvas(
-        spec=canvas.spec,
-        plan=canvas.plan,
-        width=canvas.width,
-        height=canvas.height,
+        layout_description=canvas.layout_description,
         slot_images=slot_images,
     )
 
@@ -241,10 +312,7 @@ def render_assigned_images(
         )
 
     return _materialize_manual_canvas(
-        spec=canvas.spec,
-        plan=canvas.plan,
-        width=canvas.width,
-        height=canvas.height,
+        layout_description=canvas.layout_description,
         slot_images=_slot_images_from_arrays(
             images,
             width=canvas.width,
@@ -271,10 +339,7 @@ def render_assigned_paths(
         )
 
     return _materialize_manual_canvas(
-        spec=canvas.spec,
-        plan=canvas.plan,
-        width=canvas.width,
-        height=canvas.height,
+        layout_description=canvas.layout_description,
         slot_images=_slot_images_from_paths(
             paths,
             width=canvas.width,
@@ -372,6 +437,47 @@ def render_progression_gif(
         output_file=output_file,
         duration_ms=frame_duration_ms,
         smooth_loop=smooth_loop,
+    )
+
+
+def render_animation(
+    input_folder: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+    *,
+    mode: AnimationMode = "progression",
+    output_format: AnimationFormat = "gif",
+    frame_duration_ms: int = 250,
+    fps: int = 6,
+    loops: int = 1,
+    smooth_loop: bool = False,
+    frame_count: int = 8,
+) -> AnimationRenderResponse:
+    """Render a GIF or video animation from a folder of images.
+
+    `mode="progression"` animates slice-count growth for non-random layouts.
+    `mode="random"` animates seed changes for `layout="random"`.
+    """
+    if spec is None:
+        spec = TimesliceSpec(layout="random") if mode == "random" else TimesliceSpec()
+
+    service = create_render_service()
+    request = RenderRequest(
+        input_folder=input_folder,
+        spec=spec,
+        resize_mode=resize_mode,
+    )
+    return service.render_animation_to_file(
+        request=request,
+        output_file=output_file,
+        mode=mode,
+        output_format=output_format,
+        frame_duration_ms=frame_duration_ms,
+        fps=fps,
+        loops=loops,
+        smooth_loop=smooth_loop,
+        frame_count=frame_count,
     )
 
 

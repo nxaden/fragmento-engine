@@ -4,18 +4,23 @@ import secrets
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Literal, Protocol, Sequence
 
 from pytimeslice.domain.compositor import build_timeslice
 from pytimeslice.domain.planner import max_supported_slices
 from pytimeslice.domain.models import (
     CompositeResult,
+    LayoutDescription,
     RGBImage,
     TimeslicePlan,
     TimesliceSpec,
     validate_timeslice_spec,
 )
 from pytimeslice.shared.types import ResizeMode
+
+AnimationMode = Literal["progression", "random"]
+AnimationFormat = Literal["gif", "mp4", "mov"]
+AnimationValueKind = Literal["slice_count", "seed"]
 
 
 class ImageSequenceLoader(Protocol):
@@ -149,6 +154,38 @@ class RenderResponse:
 
 
 @dataclass(frozen=True)
+class AnimationRenderResponse:
+    """Output payload for a rendered animation export.
+
+    Attributes:
+        mode: Animation strategy used to produce the keyframes.
+        output_format: Encoded output format.
+        value_kind: Whether the animation advanced slice counts or random seeds.
+        first_forward_result: The first keyframe rendered before any loop
+            expansion.
+        last_forward_result: The last keyframe rendered before any loop
+            expansion.
+        last_emitted_result: The final keyframe emitted into the encoded output.
+        input_paths: The ordered source image paths used during rendering.
+        output_file: Saved animation location.
+        base_values: The forward animation values rendered before smooth-loop or
+            repeat expansion.
+        emitted_values: The actual animation values encoded into the output.
+    """
+
+    mode: AnimationMode
+    output_format: AnimationFormat
+    value_kind: AnimationValueKind
+    first_forward_result: CompositeResult
+    last_forward_result: CompositeResult
+    last_emitted_result: CompositeResult
+    input_paths: list[Path]
+    output_file: Path
+    base_values: list[int]
+    emitted_values: list[int]
+
+
+@dataclass(frozen=True)
 class ProgressionGifRenderResponse:
     """Output payload for a progression GIF render workflow.
 
@@ -223,6 +260,7 @@ class ManualTimesliceCanvas:
     """Stateful in-memory canvas for manually assigned slice content.
 
     Attributes:
+        layout_description: Pure slot metadata shared with client flows.
         spec: The layout specification that defines the slice geometry.
         plan: Concrete plan for applying slot images to the output image.
         width: Output width in pixels.
@@ -233,6 +271,7 @@ class ManualTimesliceCanvas:
         filled_slot_indices: Sorted slot indices that have been assigned.
     """
 
+    layout_description: LayoutDescription
     spec: TimesliceSpec
     plan: TimeslicePlan
     width: int
@@ -284,26 +323,39 @@ def _resolve_output_file(
     return output_file
 
 
-def _resolve_video_output_file(
+def _resolve_animation_output_file(
     input_folder: Path,
     output_file: Path | None,
     *,
+    output_format: AnimationFormat,
     label: str,
 ) -> Path:
+    suffix = f".{output_format}"
+
     if output_file is None:
         return _default_output_file(
             input_folder,
-            suffix=".mp4",
+            suffix=suffix,
             label=label,
         )
 
     if output_file.suffix == "":
-        return output_file.with_suffix(".mp4")
+        return output_file.with_suffix(suffix)
 
-    if output_file.suffix.lower() not in {".mp4", ".mov"}:
-        raise ValueError("Video output file must use the .mp4 or .mov extension.")
+    if output_file.suffix.lower() != suffix:
+        raise ValueError(f"Animation output file must use the {suffix} extension.")
 
     return output_file
+
+
+def _output_format_from_output_file(output_file: Path | None) -> AnimationFormat:
+    if output_file is None:
+        return "mp4"
+
+    if output_file.suffix.lower() == ".mov":
+        return "mov"
+
+    return "mp4"
 
 
 def _progression_slice_counts(
@@ -341,6 +393,14 @@ def _repeat_animation_values(values: Sequence[int], loops: int) -> list[int]:
     if loops <= 0:
         raise ValueError("loops must be greater than 0.")
     return list(values) * loops
+
+
+def _animation_value_kind(mode: AnimationMode) -> AnimationValueKind:
+    return "slice_count" if mode == "progression" else "seed"
+
+
+def _animation_output_label(mode: AnimationMode) -> str:
+    return "progression" if mode == "progression" else "random-shuffle"
 
 
 class RenderTimesliceService:
@@ -459,6 +519,160 @@ class RenderTimesliceService:
             output_file=resolved_output,
         )
 
+    def _forward_animation_values(
+        self,
+        *,
+        mode: AnimationMode,
+        request: RenderRequest,
+        num_images: int,
+        span: int,
+        frame_count: int,
+    ) -> list[int]:
+        if mode == "progression":
+            if request.spec.layout == "random":
+                raise ValueError(
+                    "Progression animation is not currently supported for "
+                    "layout='random'."
+                )
+            return _progression_slice_counts(
+                num_images=num_images,
+                span=span,
+            )
+
+        if frame_count <= 0:
+            raise ValueError("frame_count must be greater than 0.")
+        if request.spec.layout != "random":
+            raise ValueError("Random animation requires layout='random'.")
+
+        base_seed = (
+            request.spec.random_seed if request.spec.random_seed is not None else 0
+        )
+        return [base_seed + frame_index for frame_index in range(frame_count)]
+
+    def _validate_animation_request(
+        self,
+        *,
+        mode: AnimationMode,
+        request: RenderRequest,
+        frame_count: int,
+    ) -> None:
+        if mode == "progression":
+            if request.spec.layout == "random":
+                raise ValueError(
+                    "Progression animation is not currently supported for "
+                    "layout='random'."
+                )
+            return
+
+        if frame_count <= 0:
+            raise ValueError("frame_count must be greater than 0.")
+        if request.spec.layout != "random":
+            raise ValueError("Random animation requires layout='random'.")
+
+    def _result_for_animation_value(
+        self,
+        *,
+        mode: AnimationMode,
+        images: Sequence[RGBImage],
+        spec: TimesliceSpec,
+        value: int,
+    ) -> CompositeResult:
+        if mode == "progression":
+            return build_timeslice(
+                images=images,
+                spec=replace(spec, num_slices=value),
+            )
+
+        return build_timeslice(
+            images=images,
+            spec=replace(spec, random_seed=value),
+        )
+
+    def render_animation_to_file(
+        self,
+        request: RenderRequest,
+        output_file: Path | None = None,
+        *,
+        mode: AnimationMode = "progression",
+        output_format: AnimationFormat = "gif",
+        frame_duration_ms: int = 250,
+        fps: int = 6,
+        loops: int = 1,
+        smooth_loop: bool = False,
+        frame_count: int = 8,
+    ) -> AnimationRenderResponse:
+        """Render an animation export and save it to disk."""
+        if self._image_writer is None:
+            raise ValueError("No image writer configured.")
+        if output_format == "gif" and frame_duration_ms <= 0:
+            raise ValueError("frame_duration_ms must be greater than 0.")
+        if output_format in {"mp4", "mov"} and fps <= 0:
+            raise ValueError("fps must be greater than 0.")
+        self._validate_animation_request(
+            mode=mode,
+            request=request,
+            frame_count=frame_count,
+        )
+
+        paths, images = self._load_paths_and_images(request)
+        height, width, _ = images[0].shape
+        span = max_supported_slices(height=height, width=width, spec=request.spec)
+        base_values = self._forward_animation_values(
+            mode=mode,
+            request=request,
+            num_images=len(images),
+            span=span,
+            frame_count=frame_count,
+        )
+        emitted_once = _smooth_loop_values(base_values) if smooth_loop else base_values
+        emitted_values = _repeat_animation_values(emitted_once, loops)
+
+        forward_results = [
+            self._result_for_animation_value(
+                mode=mode,
+                images=images,
+                spec=request.spec,
+                value=value,
+            )
+            for value in base_values
+        ]
+        results_by_value = {
+            value: result for value, result in zip(base_values, forward_results)
+        }
+        frames = [results_by_value[value].image for value in emitted_values]
+        resolved_output = _resolve_animation_output_file(
+            request.input_folder,
+            output_file,
+            output_format=output_format,
+            label=_animation_output_label(mode),
+        )
+
+        if output_format == "gif":
+            self._image_writer.save_gif(
+                frames,
+                resolved_output,
+                duration_ms=frame_duration_ms,
+            )
+        else:
+            self._image_writer.save_video(
+                frames,
+                resolved_output,
+                fps=fps,
+            )
+
+        return AnimationRenderResponse(
+            mode=mode,
+            output_format=output_format,
+            value_kind=_animation_value_kind(mode),
+            first_forward_result=forward_results[0],
+            last_forward_result=forward_results[-1],
+            last_emitted_result=results_by_value[emitted_values[-1]],
+            input_paths=paths,
+            output_file=resolved_output,
+            base_values=base_values,
+            emitted_values=emitted_values,
+        )
+
     def render_progression_gif_to_file(
         self,
         request: RenderRequest,
@@ -468,59 +682,32 @@ class RenderTimesliceService:
         smooth_loop: bool = False,
     ) -> ProgressionGifRenderResponse:
         """Render a power-of-two slice progression and save it as an animated GIF."""
-        if self._image_writer is None:
-            raise ValueError("No image writer configured.")
-        if duration_ms <= 0:
-            raise ValueError("duration_ms must be greater than 0.")
-        if request.spec.layout == "random":
-            raise ValueError(
-                "Progression GIF is not currently supported for layout='random'."
+        try:
+            animation_response = self.render_animation_to_file(
+                request=request,
+                output_file=output_file,
+                mode="progression",
+                output_format="gif",
+                frame_duration_ms=duration_ms,
+                smooth_loop=smooth_loop,
             )
+        except ValueError as exc:
+            if (
+                str(exc) == "Progression animation is not currently supported for "
+                "layout='random'."
+            ):
+                raise ValueError(
+                    "Progression GIF is not currently supported for layout='random'."
+                ) from exc
+            raise
 
-        paths, images = self._load_paths_and_images(request)
-        height, width, _ = images[0].shape
-        span = max_supported_slices(height=height, width=width, spec=request.spec)
-        base_slice_counts = _progression_slice_counts(
-            num_images=len(images),
-            span=span,
-        )
-        emitted_slice_counts = (
-            _smooth_loop_values(base_slice_counts) if smooth_loop else base_slice_counts
-        )
-
-        peak_results = [
-            build_timeslice(
-                images=images,
-                spec=replace(request.spec, num_slices=slice_count),
-            )
-            for slice_count in base_slice_counts
-        ]
-        results_by_count = {
-            slice_count: result
-            for slice_count, result in zip(base_slice_counts, peak_results)
-        }
-        frames = [
-            results_by_count[slice_count].image for slice_count in emitted_slice_counts
-        ]
-        resolved_output = _resolve_output_file(
-            request.input_folder,
-            output_file,
-            suffix=".gif",
-            label="progression",
-            require_suffix=True,
-        )
-        self._image_writer.save_gif(
-            frames,
-            resolved_output,
-            duration_ms=duration_ms,
-        )
         return ProgressionGifRenderResponse(
-            peak_result=peak_results[-1],
-            last_emitted_result=results_by_count[emitted_slice_counts[-1]],
-            input_paths=paths,
-            output_file=resolved_output,
-            base_slice_counts=base_slice_counts,
-            emitted_slice_counts=emitted_slice_counts,
+            peak_result=animation_response.last_forward_result,
+            last_emitted_result=animation_response.last_emitted_result,
+            input_paths=animation_response.input_paths,
+            output_file=animation_response.output_file,
+            base_slice_counts=animation_response.base_values,
+            emitted_slice_counts=animation_response.emitted_values,
         )
 
     def render_random_gif_to_file(
@@ -533,52 +720,28 @@ class RenderTimesliceService:
         smooth_loop: bool = False,
     ) -> RandomGifRenderResponse:
         """Render a random-layout shuffle GIF and save it to disk."""
-        if self._image_writer is None:
-            raise ValueError("No image writer configured.")
-        if duration_ms <= 0:
-            raise ValueError("duration_ms must be greater than 0.")
-        if frame_count <= 0:
-            raise ValueError("frame_count must be greater than 0.")
-        if request.spec.layout != "random":
-            raise ValueError("Random GIF requires layout='random'.")
-
-        paths, images = self._load_paths_and_images(request)
-        base_seed = (
-            request.spec.random_seed if request.spec.random_seed is not None else 0
-        )
-        base_seeds = [base_seed + frame_index for frame_index in range(frame_count)]
-        emitted_seeds = _smooth_loop_values(base_seeds) if smooth_loop else base_seeds
-
-        initial_results = [
-            build_timeslice(
-                images=images,
-                spec=replace(request.spec, random_seed=seed),
+        try:
+            animation_response = self.render_animation_to_file(
+                request=request,
+                output_file=output_file,
+                mode="random",
+                output_format="gif",
+                frame_duration_ms=duration_ms,
+                frame_count=frame_count,
+                smooth_loop=smooth_loop,
             )
-            for seed in base_seeds
-        ]
-        results_by_seed = {
-            seed: result for seed, result in zip(base_seeds, initial_results)
-        }
-        frames = [results_by_seed[seed].image for seed in emitted_seeds]
-        resolved_output = _resolve_output_file(
-            request.input_folder,
-            output_file,
-            suffix=".gif",
-            label="random-shuffle",
-            require_suffix=True,
-        )
-        self._image_writer.save_gif(
-            frames,
-            resolved_output,
-            duration_ms=duration_ms,
-        )
+        except ValueError as exc:
+            if str(exc) == "Random animation requires layout='random'.":
+                raise ValueError("Random GIF requires layout='random'.") from exc
+            raise
+
         return RandomGifRenderResponse(
-            initial_result=initial_results[0],
-            last_emitted_result=results_by_seed[emitted_seeds[-1]],
-            input_paths=paths,
-            output_file=resolved_output,
-            base_seeds=base_seeds,
-            emitted_seeds=emitted_seeds,
+            initial_result=animation_response.first_forward_result,
+            last_emitted_result=animation_response.last_emitted_result,
+            input_paths=animation_response.input_paths,
+            output_file=animation_response.output_file,
+            base_seeds=animation_response.base_values,
+            emitted_seeds=animation_response.emitted_values,
         )
 
     def render_progression_video_to_file(
@@ -591,58 +754,33 @@ class RenderTimesliceService:
         smooth_loop: bool = False,
     ) -> ProgressionVideoRenderResponse:
         """Render a power-of-two slice progression and save it as a video."""
-        if self._image_writer is None:
-            raise ValueError("No image writer configured.")
-        if fps <= 0:
-            raise ValueError("fps must be greater than 0.")
-        if request.spec.layout == "random":
-            raise ValueError(
-                "Progression video is not currently supported for layout='random'."
+        try:
+            animation_response = self.render_animation_to_file(
+                request=request,
+                output_file=output_file,
+                mode="progression",
+                output_format=_output_format_from_output_file(output_file),
+                fps=fps,
+                loops=loops,
+                smooth_loop=smooth_loop,
             )
+        except ValueError as exc:
+            if (
+                str(exc) == "Progression animation is not currently supported for "
+                "layout='random'."
+            ):
+                raise ValueError(
+                    "Progression video is not currently supported for layout='random'."
+                ) from exc
+            raise
 
-        paths, images = self._load_paths_and_images(request)
-        height, width, _ = images[0].shape
-        span = max_supported_slices(height=height, width=width, spec=request.spec)
-        base_slice_counts = _progression_slice_counts(
-            num_images=len(images),
-            span=span,
-        )
-        emitted_once = (
-            _smooth_loop_values(base_slice_counts) if smooth_loop else base_slice_counts
-        )
-        emitted_slice_counts = _repeat_animation_values(emitted_once, loops)
-
-        peak_results = [
-            build_timeslice(
-                images=images,
-                spec=replace(request.spec, num_slices=slice_count),
-            )
-            for slice_count in base_slice_counts
-        ]
-        results_by_count = {
-            slice_count: result
-            for slice_count, result in zip(base_slice_counts, peak_results)
-        }
-        frames = [
-            results_by_count[slice_count].image for slice_count in emitted_slice_counts
-        ]
-        resolved_output = _resolve_video_output_file(
-            request.input_folder,
-            output_file,
-            label="progression",
-        )
-        self._image_writer.save_video(
-            frames,
-            resolved_output,
-            fps=fps,
-        )
         return ProgressionVideoRenderResponse(
-            peak_result=peak_results[-1],
-            last_emitted_result=results_by_count[emitted_slice_counts[-1]],
-            input_paths=paths,
-            output_file=resolved_output,
-            base_slice_counts=base_slice_counts,
-            emitted_slice_counts=emitted_slice_counts,
+            peak_result=animation_response.last_forward_result,
+            last_emitted_result=animation_response.last_emitted_result,
+            input_paths=animation_response.input_paths,
+            output_file=animation_response.output_file,
+            base_slice_counts=animation_response.base_values,
+            emitted_slice_counts=animation_response.emitted_values,
         )
 
     def render_random_video_to_file(
@@ -656,49 +794,27 @@ class RenderTimesliceService:
         smooth_loop: bool = False,
     ) -> RandomVideoRenderResponse:
         """Render a random-layout shuffle animation and save it as a video."""
-        if self._image_writer is None:
-            raise ValueError("No image writer configured.")
-        if fps <= 0:
-            raise ValueError("fps must be greater than 0.")
-        if frame_count <= 0:
-            raise ValueError("frame_count must be greater than 0.")
-        if request.spec.layout != "random":
-            raise ValueError("Random video requires layout='random'.")
-
-        paths, images = self._load_paths_and_images(request)
-        base_seed = (
-            request.spec.random_seed if request.spec.random_seed is not None else 0
-        )
-        base_seeds = [base_seed + frame_index for frame_index in range(frame_count)]
-        emitted_once = _smooth_loop_values(base_seeds) if smooth_loop else base_seeds
-        emitted_seeds = _repeat_animation_values(emitted_once, loops)
-
-        initial_results = [
-            build_timeslice(
-                images=images,
-                spec=replace(request.spec, random_seed=seed),
+        try:
+            animation_response = self.render_animation_to_file(
+                request=request,
+                output_file=output_file,
+                mode="random",
+                output_format=_output_format_from_output_file(output_file),
+                fps=fps,
+                loops=loops,
+                frame_count=frame_count,
+                smooth_loop=smooth_loop,
             )
-            for seed in base_seeds
-        ]
-        results_by_seed = {
-            seed: result for seed, result in zip(base_seeds, initial_results)
-        }
-        frames = [results_by_seed[seed].image for seed in emitted_seeds]
-        resolved_output = _resolve_video_output_file(
-            request.input_folder,
-            output_file,
-            label="random-shuffle",
-        )
-        self._image_writer.save_video(
-            frames,
-            resolved_output,
-            fps=fps,
-        )
+        except ValueError as exc:
+            if str(exc) == "Random animation requires layout='random'.":
+                raise ValueError("Random video requires layout='random'.") from exc
+            raise
+
         return RandomVideoRenderResponse(
-            initial_result=initial_results[0],
-            last_emitted_result=results_by_seed[emitted_seeds[-1]],
-            input_paths=paths,
-            output_file=resolved_output,
-            base_seeds=base_seeds,
-            emitted_seeds=emitted_seeds,
+            initial_result=animation_response.first_forward_result,
+            last_emitted_result=animation_response.last_emitted_result,
+            input_paths=animation_response.input_paths,
+            output_file=animation_response.output_file,
+            base_seeds=animation_response.base_values,
+            emitted_seeds=animation_response.emitted_values,
         )

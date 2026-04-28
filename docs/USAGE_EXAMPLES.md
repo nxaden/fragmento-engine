@@ -155,9 +155,12 @@ pytimeslice ./frames ./out/full-overlay.jpg \
 
 ```sh
 pytimeslice ./frames \
-  --progression-gif \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180 \
+  --animate \
+  --animation-mode progression \
+  --animation-format gif \
+  --animation-frame-duration-ms 180 \
+  --animation-loops 2 \
+  --animation-smooth-loop \
   --orientation vertical \
   --border 4 \
   --border-color-mode gradient \
@@ -174,10 +177,12 @@ pytimeslice ./frames \
 
 ```sh
 pytimeslice ./frames ./out/progression.mp4 \
-  --progression-video \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop \
+  --animate \
+  --animation-mode progression \
+  --animation-format mp4 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop \
   --orientation vertical \
   --border 4 \
   --border-color-mode gradient \
@@ -222,10 +227,13 @@ pytimeslice ./frames ./out/random-shuffle.gif \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-gif \
-  --random-gif-frames 8 \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180
+  --animate \
+  --animation-mode random \
+  --animation-format gif \
+  --animation-frame-count 8 \
+  --animation-frame-duration-ms 180 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 This keeps the same random block count but advances the random seed once per
@@ -238,11 +246,13 @@ pytimeslice ./frames ./out/random-shuffle.mp4 \
   --layout random \
   --random-blocks 128 \
   --random-seed 7 \
-  --random-video \
-  --random-video-frames 8 \
-  --video-fps 12 \
-  --video-loops 2 \
-  --gif-smooth-loop
+  --animate \
+  --animation-mode random \
+  --animation-format mp4 \
+  --animation-frame-count 8 \
+  --animation-fps 12 \
+  --animation-loops 2 \
+  --animation-smooth-loop
 ```
 
 This emits the same shuffled random layout idea as the GIF workflow, but
