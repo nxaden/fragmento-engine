@@ -1,5 +1,7 @@
 # pytimeslice
 
+![Timeslice](assets/timeslice.gif)
+
 `pytimeslice` is a Python image-processing library for building composite
 timeslice images from ordered frame sequences.
 
