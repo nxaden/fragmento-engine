@@ -54,6 +54,24 @@ animated = render_random_gif(
 )
 ```
 
+To render a video export, `ffmpeg` must be available on `PATH`:
+
+```python
+from pathlib import Path
+
+from pytimeslice import TimesliceSpec, render_random_video
+
+video = render_random_video(
+    input_folder=Path("./frames"),
+    output_file=Path("./out/random-shuffle.mp4"),
+    spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    frame_count=8,
+    fps=12,
+    loops=2,
+    smooth_loop=True,
+)
+```
+
 Built-in mask layouts are also available from the Python API:
 
 ```python
@@ -171,6 +189,31 @@ pytimeslice ./frames ./out/random-shuffle.gif \
   --random-gif-frames 8 \
   --gif-smooth-loop \
   --gif-frame-duration-ms 180
+```
+
+Random-layout video export:
+
+```sh
+pytimeslice ./frames ./out/random-shuffle.mov \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7 \
+  --random-video \
+  --random-video-frames 8 \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop
+```
+
+Progression video export:
+
+```sh
+pytimeslice ./frames ./out/progression.mp4 \
+  --progression-video \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop \
+  --orientation vertical
 ```
 
 In manual mode, the first positional path is the output file. Unassigned slots

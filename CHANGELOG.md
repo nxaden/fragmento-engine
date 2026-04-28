@@ -28,6 +28,8 @@ releases begin.
 - Random-layout animated GIF support in both the Python API and CLI through a
   dedicated seed-shuffle workflow, including configurable frame counts and
   smooth-loop emission.
+- `.mp4` and `.mov` animation export support for progression and random-shuffle
+  workflows, including configurable video frame rates and repeat counts.
 
 ### Changed
 

@@ -127,6 +127,27 @@ print(animated.emitted_seeds)
 print(animated.output_file)
 ```
 
+To render a video export, `ffmpeg` must be available on `PATH`:
+
+```python
+from pathlib import Path
+
+from pytimeslice import TimesliceSpec, render_random_video
+
+video = render_random_video(
+    input_folder=Path("./frames"),
+    output_file=Path("./out/random-shuffle.mov"),
+    spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+    frame_count=8,
+    fps=12,
+    loops=2,
+    smooth_loop=True,
+)
+
+print(video.emitted_seeds)
+print(video.output_file)
+```
+
 Mask-based layouts are available from the Python API:
 
 ```python
@@ -316,6 +337,34 @@ pytimeslice ./frames ./out/random-shuffle.gif \
   --gif-smooth-loop \
   --gif-frame-duration-ms 180
 ```
+
+Render a random-layout video export by advancing the random seed each frame:
+
+```sh
+pytimeslice ./frames ./out/random-shuffle.mov \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7 \
+  --random-video \
+  --random-video-frames 8 \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop
+```
+
+Render a progression video export:
+
+```sh
+pytimeslice ./frames ./out/progression.mp4 \
+  --progression-video \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop \
+  --orientation vertical
+```
+
+Video exports require `ffmpeg` on `PATH` and support `.mp4` or `.mov` output
+paths.
 
 More CLI recipes, including overlay practice commands, live in
 [the hosted docs](https://nxaden.github.io/pytimeslice/USAGE_EXAMPLES/).

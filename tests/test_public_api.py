@@ -15,3 +15,5 @@ def test_manual_assignment_helpers_are_exposed() -> None:
     assert pytimeslice.render_assigned_images is not None
     assert pytimeslice.render_assigned_paths is not None
     assert pytimeslice.render_random_gif is not None
+    assert pytimeslice.render_progression_video is not None
+    assert pytimeslice.render_random_video is not None

@@ -8,7 +8,9 @@ import pytimeslice.app as app_module
 from pytimeslice import render_images
 from pytimeslice.application.services import (
     ProgressionGifRenderResponse,
+    ProgressionVideoRenderResponse,
     RandomGifRenderResponse,
+    RandomVideoRenderResponse,
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
@@ -45,6 +47,7 @@ class RecordingWriter:
     def __init__(self) -> None:
         self.saved_images: list[tuple[RGBImage, Path]] = []
         self.saved_gifs: list[tuple[list[RGBImage], Path, int]] = []
+        self.saved_videos: list[tuple[list[RGBImage], Path, int]] = []
 
     def save(self, image: RGBImage, output_file: Path) -> None:
         self.saved_images.append((image, output_file))
@@ -57,6 +60,15 @@ class RecordingWriter:
         duration_ms: int = 250,
     ) -> None:
         self.saved_gifs.append((images, output_file, duration_ms))
+
+    def save_video(
+        self,
+        images: list[RGBImage],
+        output_file: Path,
+        *,
+        fps: int = 6,
+    ) -> None:
+        self.saved_videos.append((images, output_file, fps))
 
 
 class RecordingRenderService:
@@ -327,6 +339,68 @@ def test_render_progression_gif_rejects_random_layout_before_loading_images(
     assert loader.load_images_calls == 0
 
 
+def test_render_progression_video_repeats_emitted_slice_counts_for_loops(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(5)]
+    images = [_solid_frame(index * 10, width=16) for index in range(5)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+
+    response = service.render_progression_video_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(orientation="vertical"),
+        ),
+        fps=6,
+        loops=2,
+        smooth_loop=True,
+    )
+
+    assert isinstance(response, ProgressionVideoRenderResponse)
+    assert response.base_slice_counts == [1, 2, 4, 8]
+    assert response.emitted_slice_counts == [1, 2, 4, 8, 4, 2, 1, 2, 4, 8, 4, 2]
+    assert response.output_file.suffix == ".mp4"
+
+    assert len(writer.saved_videos) == 1
+    frames, output_file, fps = writer.saved_videos[0]
+    assert len(frames) == 12
+    assert output_file == response.output_file
+    assert fps == 6
+
+
+def test_render_progression_video_accepts_mov_output_file(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(3)]
+    images = [_solid_frame(index * 10, width=8, height=4) for index in range(3)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+    output_file = tmp_path / "out" / "progression.mov"
+
+    response = service.render_progression_video_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(orientation="vertical"),
+        ),
+        output_file=output_file,
+        fps=8,
+    )
+
+    assert response.output_file == output_file
+    assert len(writer.saved_videos) == 1
+
+
 def test_render_random_gif_uses_incrementing_seed_sequence(
     tmp_path: Path,
 ) -> None:
@@ -454,6 +528,70 @@ def test_render_random_gif_rejects_non_random_layout_before_loading_images(
     assert loader.load_images_calls == 0
 
 
+def test_render_random_video_repeats_emitted_seeds_for_loops(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(4)]
+    images = [_solid_frame(index * 60, width=4, height=4) for index in range(4)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+
+    response = service.render_random_video_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=7),
+        ),
+        fps=12,
+        frame_count=3,
+        loops=2,
+        smooth_loop=True,
+    )
+
+    assert isinstance(response, RandomVideoRenderResponse)
+    assert response.base_seeds == [7, 8, 9]
+    assert response.emitted_seeds == [7, 8, 9, 8, 7, 8, 9, 8]
+    assert response.output_file.suffix == ".mp4"
+
+    assert len(writer.saved_videos) == 1
+    frames, output_file, fps = writer.saved_videos[0]
+    assert len(frames) == 8
+    assert output_file == response.output_file
+    assert fps == 12
+
+
+def test_render_random_video_rejects_non_random_layout_before_loading_images(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    loader = RecordingLoader(
+        paths=[input_folder / "001.png"],
+        images=[_solid_frame(0, width=4, height=4)],
+    )
+    service = RenderTimesliceService(
+        sequence_loader=loader,
+        image_writer=RecordingWriter(),
+    )
+
+    with pytest.raises(ValueError, match="requires layout='random'"):
+        service.render_random_video_to_file(
+            RenderRequest(
+                input_folder=input_folder,
+                spec=TimesliceSpec(layout="circular", num_slices=4),
+            ),
+            fps=12,
+            frame_count=3,
+        )
+
+    assert loader.get_image_paths_calls == 0
+    assert loader.load_images_calls == 0
+
+
 def test_service_rejects_invalid_effects_before_loading_images(
     tmp_path: Path,
 ) -> None:
@@ -543,6 +681,43 @@ def test_cli_random_gif_output_file_is_optional() -> None:
     assert args.output_file is None
     assert args.random_gif is True
     assert args.random_gif_frames == 6
+
+
+def test_cli_output_file_is_optional_for_progression_video() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--progression-video",
+            "--video-fps",
+            "12",
+            "--video-loops",
+            "2",
+        ]
+    )
+
+    assert args.output_file is None
+    assert args.progression_video is True
+    assert args.video_fps == 12
+    assert args.video_loops == 2
+
+
+def test_cli_random_video_output_file_is_optional() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--random-video",
+            "--random-video-frames",
+            "6",
+        ]
+    )
+
+    assert args.output_file is None
+    assert args.random_video is True
+    assert args.random_video_frames == 6
 
 
 def test_cli_builds_diagonal_layout_spec() -> None:
@@ -748,6 +923,27 @@ def test_cli_rejects_progression_gif_with_random_gif(
         cli_main()
 
 
+def test_cli_rejects_progression_video_with_random_video(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            "frames",
+            "--layout",
+            "random",
+            "--random-blocks",
+            "4",
+            "--progression-video",
+            "--random-video",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main()
+
+
 def test_cli_rejects_effects_for_non_band_layouts() -> None:
     parser = build_parser()
     args = parser.parse_args(
@@ -844,6 +1040,170 @@ def test_cli_random_gif_renders_output(
     with Image.open(output_file) as rendered:
         assert rendered.n_frames == 3
         assert rendered.size == (4, 4)
+
+
+def test_cli_progression_video_delegates_to_video_export(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    output_file = tmp_path / "progression.mov"
+    captured: dict[str, object] = {}
+    result = render_images(
+        images=[
+            _solid_frame(0, width=4, height=4),
+            _solid_frame(120, width=4, height=4),
+        ],
+        spec=TimesliceSpec(num_slices=2),
+    )
+
+    def fake_render_progression_video(
+        input_folder: Path,
+        output_file: Path | None = None,
+        spec: TimesliceSpec | None = None,
+        resize_mode: str = "crop",
+        fps: int = 6,
+        loops: int = 1,
+        smooth_loop: bool = False,
+    ) -> ProgressionVideoRenderResponse:
+        captured["input_folder"] = input_folder
+        captured["output_file"] = output_file
+        captured["spec"] = spec
+        captured["resize_mode"] = resize_mode
+        captured["fps"] = fps
+        captured["loops"] = loops
+        captured["smooth_loop"] = smooth_loop
+        return ProgressionVideoRenderResponse(
+            peak_result=result,
+            last_emitted_result=result,
+            input_paths=[input_folder / "001.png"],
+            output_file=output_file
+            if output_file is not None
+            else input_folder / "out.mp4",
+            base_slice_counts=[1, 2],
+            emitted_slice_counts=[1, 2, 1, 2],
+        )
+
+    monkeypatch.setattr(
+        "pytimeslice.interface.cli.render_progression_video",
+        fake_render_progression_video,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(input_folder),
+            str(output_file),
+            "--progression-video",
+            "--slices",
+            "2",
+            "--video-fps",
+            "12",
+            "--video-loops",
+            "2",
+            "--gif-smooth-loop",
+        ],
+    )
+
+    cli_main()
+
+    assert captured["input_folder"] == input_folder
+    assert captured["output_file"] == output_file
+    assert captured["spec"] == TimesliceSpec(
+        orientation="vertical", layout="bands", num_slices=2
+    )
+    assert captured["fps"] == 12
+    assert captured["loops"] == 2
+    assert captured["smooth_loop"] is True
+
+
+def test_cli_random_video_delegates_to_video_export(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    output_file = tmp_path / "random.mp4"
+    captured: dict[str, object] = {}
+    result = render_images(
+        images=[
+            _solid_frame(0, width=4, height=4),
+            _solid_frame(120, width=4, height=4),
+            _solid_frame(240, width=4, height=4),
+            _solid_frame(60, width=4, height=4),
+        ],
+        spec=TimesliceSpec(layout="random", num_blocks=4, random_seed=7),
+    )
+
+    def fake_render_random_video(
+        input_folder: Path,
+        output_file: Path | None = None,
+        spec: TimesliceSpec | None = None,
+        resize_mode: str = "crop",
+        fps: int = 6,
+        loops: int = 1,
+        frame_count: int = 8,
+        smooth_loop: bool = False,
+    ) -> RandomVideoRenderResponse:
+        captured["input_folder"] = input_folder
+        captured["output_file"] = output_file
+        captured["spec"] = spec
+        captured["resize_mode"] = resize_mode
+        captured["fps"] = fps
+        captured["loops"] = loops
+        captured["frame_count"] = frame_count
+        captured["smooth_loop"] = smooth_loop
+        return RandomVideoRenderResponse(
+            initial_result=result,
+            last_emitted_result=result,
+            input_paths=[input_folder / "001.png"],
+            output_file=output_file
+            if output_file is not None
+            else input_folder / "out.mp4",
+            base_seeds=[7, 8, 9],
+            emitted_seeds=[7, 8, 9, 8],
+        )
+
+    monkeypatch.setattr(
+        "pytimeslice.interface.cli.render_random_video",
+        fake_render_random_video,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(input_folder),
+            str(output_file),
+            "--layout",
+            "random",
+            "--random-blocks",
+            "4",
+            "--random-seed",
+            "7",
+            "--random-video",
+            "--random-video-frames",
+            "3",
+            "--video-fps",
+            "10",
+            "--video-loops",
+            "2",
+            "--gif-smooth-loop",
+        ],
+    )
+
+    cli_main()
+
+    assert captured["input_folder"] == input_folder
+    assert captured["output_file"] == output_file
+    assert captured["spec"] == TimesliceSpec(
+        orientation="vertical",
+        layout="random",
+        num_blocks=4,
+        random_seed=7,
+    )
+    assert captured["fps"] == 10
+    assert captured["loops"] == 2
+    assert captured["frame_count"] == 3
+    assert captured["smooth_loop"] is True
 
 
 def test_cli_manual_assigned_paths_renders_output(

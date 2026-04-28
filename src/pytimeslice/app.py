@@ -8,7 +8,9 @@ import numpy as np
 from pytimeslice.application.services import (
     ManualTimesliceCanvas,
     ProgressionGifRenderResponse,
+    ProgressionVideoRenderResponse,
     RandomGifRenderResponse,
+    RandomVideoRenderResponse,
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
@@ -402,6 +404,74 @@ def render_random_gif(
         request=request,
         output_file=output_file,
         duration_ms=frame_duration_ms,
+        frame_count=frame_count,
+        smooth_loop=smooth_loop,
+    )
+
+
+def render_progression_video(
+    input_folder: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+    fps: int = 6,
+    loops: int = 1,
+    smooth_loop: bool = False,
+) -> ProgressionVideoRenderResponse:
+    """Render a power-of-two slice progression video from a folder of images.
+
+    Video export requires `ffmpeg` on `PATH` and supports `.mp4` or `.mov`
+    output paths. `loops` repeats the emitted animation sequence in the encoded
+    video.
+    """
+    if spec is None:
+        spec = TimesliceSpec()
+
+    service = create_render_service()
+    request = RenderRequest(
+        input_folder=input_folder,
+        spec=spec,
+        resize_mode=resize_mode,
+    )
+    return service.render_progression_video_to_file(
+        request=request,
+        output_file=output_file,
+        fps=fps,
+        loops=loops,
+        smooth_loop=smooth_loop,
+    )
+
+
+def render_random_video(
+    input_folder: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+    fps: int = 6,
+    loops: int = 1,
+    frame_count: int = 8,
+    smooth_loop: bool = False,
+) -> RandomVideoRenderResponse:
+    """Render a random-layout shuffle video from a folder of images.
+
+    Video export requires `ffmpeg` on `PATH` and supports `.mp4` or `.mov`
+    output paths. `loops` repeats the emitted animation sequence in the encoded
+    video.
+    """
+    if spec is None:
+        spec = TimesliceSpec(layout="random")
+
+    service = create_render_service()
+    request = RenderRequest(
+        input_folder=input_folder,
+        spec=spec,
+        resize_mode=resize_mode,
+    )
+    return service.render_random_video_to_file(
+        request=request,
+        output_file=output_file,
+        fps=fps,
+        loops=loops,
         frame_count=frame_count,
         smooth_loop=smooth_loop,
     )

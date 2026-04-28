@@ -170,6 +170,26 @@ pytimeslice ./frames \
   --curve smoothstep
 ```
 
+## Progression Video
+
+```sh
+pytimeslice ./frames ./out/progression.mp4 \
+  --progression-video \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop \
+  --orientation vertical \
+  --border 4 \
+  --border-color-mode gradient \
+  --border-opacity 0.8 \
+  --shadow 8 \
+  --shadow-opacity 0.35 \
+  --highlight 4 \
+  --highlight-opacity 0.2 \
+  --feather 6 \
+  --curve smoothstep
+```
+
 ## Diagonal Layout
 
 ```sh
@@ -210,6 +230,23 @@ pytimeslice ./frames ./out/random-shuffle.gif \
 
 This keeps the same random block count but advances the random seed once per
 forward keyframe.
+
+## Random Shuffle Video
+
+```sh
+pytimeslice ./frames ./out/random-shuffle.mp4 \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7 \
+  --random-video \
+  --random-video-frames 8 \
+  --video-fps 12 \
+  --video-loops 2 \
+  --gif-smooth-loop
+```
+
+This emits the same shuffled random layout idea as the GIF workflow, but
+encodes it as `.mp4` or `.mov`. Video export requires `ffmpeg` on `PATH`.
 
 ## User-Defined Mask Layout
 
