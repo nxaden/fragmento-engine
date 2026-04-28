@@ -22,6 +22,9 @@ releases begin.
 - Manual slot-assignment helpers for future client flows, including explicit
   per-slice path/image rendering and an incremental empty-canvas builder that
   defaults to 4K previews.
+- CLI support for manual assignment with `--assigned-path`, `--slot-path`, and
+  `--manual-empty`, including partial black-slot previews and configurable
+  manual canvas dimensions.
 
 ### Changed
 

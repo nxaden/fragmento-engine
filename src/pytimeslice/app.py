@@ -40,6 +40,11 @@ def _manual_slot_count(spec: TimesliceSpec) -> int:
         raise ValueError(
             "Manual slot assignment is not currently supported for layout='random'."
         )
+    if spec.reverse_time:
+        raise ValueError(
+            "Manual slot assignment does not support reverse_time; provide slot "
+            "images in the exact order you want rendered."
+        )
     if spec.num_slices is None:
         raise ValueError(
             "Manual slot assignment requires spec.num_slices to be explicitly set."

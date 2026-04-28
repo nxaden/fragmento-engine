@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
 import pytimeslice.app as app_module
 from pytimeslice import render_images
@@ -12,7 +13,7 @@ from pytimeslice.application.services import (
     RenderTimesliceService,
 )
 from pytimeslice.domain.models import RGBImage, SliceEffects, TimesliceSpec
-from pytimeslice.interface.cli import _build_spec, build_parser
+from pytimeslice.interface.cli import _build_spec, build_parser, main as cli_main
 
 
 def _solid_frame(value: int, *, width: int = 8, height: int = 2) -> RGBImage:
@@ -617,3 +618,155 @@ def test_cli_rejects_non_positive_gif_duration() -> None:
                 "0",
             ]
         )
+
+
+def test_cli_manual_assigned_paths_renders_output(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "manual-assigned.png"
+    paths: list[Path] = []
+    for index, value in enumerate((10, 200, 50, 0, 150)):
+        path = tmp_path / f"{index}.png"
+        Image.fromarray(_solid_frame(value, width=2, height=10)).save(path)
+        paths.append(path)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(output_file),
+            "--assigned-path",
+            str(paths[0]),
+            "--assigned-path",
+            str(paths[1]),
+            "--assigned-path",
+            str(paths[2]),
+            "--assigned-path",
+            str(paths[3]),
+            "--assigned-path",
+            str(paths[4]),
+            "--orientation",
+            "horizontal",
+            "--slices",
+            "5",
+            "--canvas-width",
+            "2",
+            "--canvas-height",
+            "10",
+        ],
+    )
+
+    cli_main()
+
+    rendered = np.array(Image.open(output_file).convert("RGB"), dtype=np.uint8)
+    assert rendered[:, 0, 0].tolist() == [10, 10, 200, 200, 50, 50, 0, 0, 150, 150]
+
+
+def test_cli_manual_slot_paths_can_render_partial_preview(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    Image.fromarray(_solid_frame(80, width=4, height=2)).save(first)
+    Image.fromarray(_solid_frame(180, width=4, height=2)).save(second)
+    output_file = tmp_path / "manual-partial.png"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(output_file),
+            "--slot-path",
+            "1",
+            str(first),
+            "--slot-path",
+            "3",
+            str(second),
+            "--orientation",
+            "vertical",
+            "--slices",
+            "4",
+            "--canvas-width",
+            "8",
+            "--canvas-height",
+            "2",
+        ],
+    )
+
+    cli_main()
+
+    rendered = np.array(Image.open(output_file).convert("RGB"), dtype=np.uint8)
+    assert rendered[0, :, 0].tolist() == [0, 0, 80, 80, 0, 0, 180, 180]
+
+
+def test_cli_manual_empty_creates_blank_canvas(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "manual-empty.png"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(output_file),
+            "--manual-empty",
+            "--layout",
+            "diagonal",
+            "--slices",
+            "4",
+            "--canvas-width",
+            "6",
+            "--canvas-height",
+            "4",
+        ],
+    )
+
+    cli_main()
+
+    rendered = np.array(Image.open(output_file).convert("RGB"), dtype=np.uint8)
+    assert rendered.shape == (4, 6, 3)
+    assert np.count_nonzero(rendered) == 0
+
+
+def test_cli_manual_mode_requires_slices(monkeypatch, tmp_path: Path) -> None:
+    output_file = tmp_path / "manual-missing-slices.png"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(output_file),
+            "--manual-empty",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main()
+
+
+def test_cli_manual_mode_rejects_mixed_assignment_styles(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_file = tmp_path / "manual-invalid.png"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pytimeslice",
+            str(output_file),
+            "--assigned-path",
+            str(tmp_path / "a.png"),
+            "--slot-path",
+            "0",
+            str(tmp_path / "b.png"),
+            "--slices",
+            "1",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main()

@@ -119,3 +119,31 @@ pytimeslice ./frames --layout random --random-blocks 128 --random-seed 7
 
 pytimeslice ./frames --layout mask --layout-mask ./masks/layout.npy --slices 24
 ```
+
+Manual CLI assignment examples:
+
+```sh
+pytimeslice ./out/manual-order.png \
+  --assigned-path ./frames/a.jpg \
+  --assigned-path ./frames/b.jpg \
+  --assigned-path ./frames/c.jpg \
+  --assigned-path ./frames/d.jpg \
+  --assigned-path ./frames/e.jpg \
+  --orientation horizontal \
+  --slices 5
+
+pytimeslice ./out/manual-preview.png \
+  --slot-path 1 ./frames/b.jpg \
+  --slot-path 3 ./frames/d.jpg \
+  --orientation horizontal \
+  --slices 5
+
+pytimeslice ./out/manual-empty.png \
+  --manual-empty \
+  --layout diagonal \
+  --slices 5
+```
+
+In manual mode, the first positional path is the output file. Unassigned slots
+render as black, and the manual canvas defaults to 3840x2160 unless you pass
+`--canvas-width` and `--canvas-height`.

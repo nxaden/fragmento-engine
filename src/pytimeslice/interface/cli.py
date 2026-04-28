@@ -9,9 +9,17 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
-from pytimeslice import render_folder_to_file, render_progression_gif
+from pytimeslice import (
+    assign_path_to_slot,
+    create_manual_timeslice,
+    render_assigned_paths,
+    render_folder_to_file,
+    render_progression_gif,
+)
 from pytimeslice import SliceEffects, TimesliceSpec
+from pytimeslice.app import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from pytimeslice.domain.models import validate_timeslice_spec
+from pytimeslice.infrastructure.image_writer import PILImageWriter
 
 
 def _parse_non_negative_int(value: str) -> int:
@@ -122,6 +130,114 @@ def _load_layout_mask(mask_file: Path) -> npt.NDArray[np.float64]:
     return loaded.astype(np.float64, copy=False)
 
 
+def _manual_mode_requested(args: argparse.Namespace) -> bool:
+    return bool(args.assigned_paths or args.slot_paths or args.manual_empty)
+
+
+def _resolve_manual_output_file(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> Path:
+    if args.output_file is not None:
+        parser.error(
+            "Manual assignment mode accepts only one positional path: output_file."
+        )
+
+    if args.input_folder is None:
+        parser.error("Manual assignment mode requires an output_file path.")
+
+    if args.input_folder.suffix == "":
+        return args.input_folder.with_suffix(".png")
+
+    return args.input_folder
+
+
+def _parse_slot_paths(
+    raw_slot_paths: list[list[str]] | None,
+    *,
+    slot_count: int,
+    parser: argparse.ArgumentParser,
+) -> list[tuple[int, Path]]:
+    assignments: list[tuple[int, Path]] = []
+    seen_indices: set[int] = set()
+
+    for raw_pair in raw_slot_paths or []:
+        raw_index, raw_path = raw_pair
+        try:
+            slot_index = _parse_non_negative_int(raw_index)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(f"Invalid --slot-path index {raw_index!r}: {exc}")
+
+        if slot_index >= slot_count:
+            parser.error(
+                f"--slot-path index {slot_index} is out of range for {slot_count} slots."
+            )
+        if slot_index in seen_indices:
+            parser.error(f"--slot-path index {slot_index} was provided more than once.")
+
+        seen_indices.add(slot_index)
+        assignments.append((slot_index, Path(raw_path)))
+
+    return assignments
+
+
+def _render_manual_assignment(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    spec: TimesliceSpec,
+) -> None:
+    if args.progression_gif:
+        parser.error("Progression GIF is not supported with manual assignment mode.")
+    if args.assigned_paths and args.slot_paths:
+        parser.error("--assigned-path cannot be combined with --slot-path.")
+    if args.manual_empty and (args.assigned_paths or args.slot_paths):
+        parser.error("--manual-empty cannot be combined with slot assignments.")
+    if spec.num_slices is None:
+        parser.error("--slices is required when using manual assignment mode.")
+
+    output_file = _resolve_manual_output_file(args, parser)
+
+    try:
+        if args.assigned_paths:
+            if len(args.assigned_paths) != spec.num_slices:
+                parser.error(
+                    f"Expected {spec.num_slices} --assigned-path values, received "
+                    f"{len(args.assigned_paths)}."
+                )
+
+            canvas = render_assigned_paths(
+                paths=args.assigned_paths,
+                spec=spec,
+                width=args.canvas_width,
+                height=args.canvas_height,
+                resize_mode=args.resize_mode,
+            )
+        else:
+            canvas = create_manual_timeslice(
+                spec,
+                width=args.canvas_width,
+                height=args.canvas_height,
+            )
+            assignments = _parse_slot_paths(
+                args.slot_paths,
+                slot_count=canvas.slot_count,
+                parser=parser,
+            )
+            for slot_index, path in assignments:
+                canvas = assign_path_to_slot(
+                    canvas,
+                    slot_index,
+                    path,
+                    resize_mode=args.resize_mode,
+                )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    PILImageWriter().save(canvas.image, output_file)
+    print(f"Assigned {len(canvas.filled_slot_indices)}/{canvas.slot_count} slots.")
+    print(f"Saved: {output_file}")
+
+
 def _build_spec(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
@@ -169,8 +285,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Create a time-slice image from a sequence of photos."
     )
-    parser.add_argument("input_folder", type=Path)
-    parser.add_argument("output_file", type=Path, nargs="?", default=None)
+    parser.add_argument(
+        "input_folder",
+        type=Path,
+        nargs="?",
+        default=None,
+        help=(
+            "Folder of source frames for standard rendering. In manual "
+            "assignment mode, omit this and pass only the output path."
+        ),
+    )
+    parser.add_argument(
+        "output_file",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="Optional output path for standard folder rendering.",
+    )
     parser.add_argument(
         "--layout",
         choices=["bands", "diagonal", "spiral", "circular", "random", "mask"],
@@ -208,6 +339,48 @@ def build_parser() -> argparse.ArgumentParser:
             "User-defined layout mask for --layout mask. Supports .npy files "
             "or grayscale image files."
         ),
+    )
+    parser.add_argument(
+        "--assigned-path",
+        dest="assigned_paths",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Manual mode: explicit ordered slot content. Repeat once per slot; "
+            "list order maps directly to slice order."
+        ),
+    )
+    parser.add_argument(
+        "--slot-path",
+        dest="slot_paths",
+        action="append",
+        nargs=2,
+        default=None,
+        metavar=("INDEX", "PATH"),
+        help=(
+            "Manual mode: assign one slot at a time by index. Repeatable. "
+            "Unassigned slots render as black."
+        ),
+    )
+    parser.add_argument(
+        "--manual-empty",
+        action="store_true",
+        help="Manual mode: render an empty black canvas for the requested layout.",
+    )
+    parser.add_argument(
+        "--canvas-width",
+        type=_parse_positive_int,
+        default=DEFAULT_CANVAS_WIDTH,
+        metavar="PX",
+        help="Manual mode canvas width in pixels. Defaults to 3840.",
+    )
+    parser.add_argument(
+        "--canvas-height",
+        type=_parse_positive_int,
+        default=DEFAULT_CANVAS_HEIGHT,
+        metavar="PX",
+        help="Manual mode canvas height in pixels. Defaults to 2160.",
     )
     parser.add_argument(
         "--orientation",
@@ -326,6 +499,12 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     spec = _build_spec(args, parser)
+    if _manual_mode_requested(args):
+        _render_manual_assignment(args, parser, spec)
+        return
+
+    if args.input_folder is None:
+        parser.error("input_folder is required unless manual assignment mode is used.")
     if args.progression_gif and spec.layout == "random":
         parser.error("Progression GIF is not currently supported with --layout random.")
 

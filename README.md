@@ -250,6 +250,41 @@ pytimeslice ./frames \
   --slices 24
 ```
 
+Manual assignment is also available from the CLI. In this mode, the first
+positional path is the output file, not an input folder.
+
+Render a custom ordered 5-slice composition from explicit paths:
+
+```sh
+pytimeslice ./out/manual-order.png \
+  --assigned-path ./frames/a.jpg \
+  --assigned-path ./frames/b.jpg \
+  --assigned-path ./frames/c.jpg \
+  --assigned-path ./frames/d.jpg \
+  --assigned-path ./frames/e.jpg \
+  --orientation horizontal \
+  --slices 5
+```
+
+Render a partial preview with only some slots filled:
+
+```sh
+pytimeslice ./out/manual-preview.png \
+  --slot-path 1 ./frames/b.jpg \
+  --slot-path 3 ./frames/d.jpg \
+  --orientation horizontal \
+  --slices 5
+```
+
+Initialize an empty 4K manual canvas:
+
+```sh
+pytimeslice ./out/manual-empty.png \
+  --manual-empty \
+  --layout diagonal \
+  --slices 5
+```
+
 More CLI recipes, including overlay practice commands, live in
 [the hosted docs](https://nxaden.github.io/pytimeslice/USAGE_EXAMPLES/).
 

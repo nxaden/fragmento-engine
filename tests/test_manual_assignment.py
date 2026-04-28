@@ -63,6 +63,17 @@ def test_create_manual_timeslice_rejects_random_layout() -> None:
         create_manual_timeslice(TimesliceSpec(layout="random", num_blocks=4))
 
 
+def test_create_manual_timeslice_rejects_reverse_time() -> None:
+    with pytest.raises(ValueError, match="does not support reverse_time"):
+        create_manual_timeslice(
+            TimesliceSpec(
+                orientation="horizontal",
+                num_slices=5,
+                reverse_time=True,
+            )
+        )
+
+
 def test_assign_image_to_slot_builds_manual_canvas_progressively() -> None:
     canvas = create_manual_timeslice(
         TimesliceSpec(orientation="vertical", num_slices=3),

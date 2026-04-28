@@ -204,6 +204,45 @@ pytimeslice ./frames ./out/custom-mask-layout.jpg \
   --slices 24
 ```
 
+## Manual Ordered Slots
+
+```sh
+pytimeslice ./out/manual-order.png \
+  --assigned-path ./frames/a.jpg \
+  --assigned-path ./frames/b.jpg \
+  --assigned-path ./frames/c.jpg \
+  --assigned-path ./frames/d.jpg \
+  --assigned-path ./frames/e.jpg \
+  --orientation horizontal \
+  --slices 5
+```
+
+## Manual Partial Preview
+
+```sh
+pytimeslice ./out/manual-preview.png \
+  --slot-path 1 ./frames/b.jpg \
+  --slot-path 3 ./frames/d.jpg \
+  --orientation horizontal \
+  --slices 5
+```
+
+Unassigned slots render as black. This makes it possible to generate a
+preview while another client keeps track of which slots have already been
+filled.
+
+## Manual Empty Canvas
+
+```sh
+pytimeslice ./out/manual-empty.png \
+  --manual-empty \
+  --layout diagonal \
+  --slices 5
+```
+
+In manual mode, the first positional path is the output file. The canvas
+defaults to 3840x2160 unless you pass `--canvas-width` and `--canvas-height`.
+
 ## Practice Tip
 
 Keep the same input frames and output dimensions, then change only one option at
