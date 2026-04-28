@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -6,11 +6,13 @@ import numpy as np
 import numpy.typing as npt
 
 Orientation = Literal["vertical", "horizontal"]
+LayoutMode = Literal["bands", "diagonal", "spiral", "circular", "random", "mask"]
 BoundaryCurve = Literal["linear", "smoothstep", "cosine", "hard"]
 BorderColorMode = Literal["solid", "auto", "gradient"]
 RGBColor = tuple[int, int, int]
 RGBImage = npt.NDArray[np.uint8]
 
+_VALID_LAYOUTS = {"bands", "diagonal", "spiral", "circular", "random", "mask"}
 _VALID_BORDER_COLOR_MODES = {"solid", "auto", "gradient"}
 _VALID_CURVES = {"linear", "smoothstep", "cosine", "hard"}
 
@@ -84,14 +86,73 @@ def validate_slice_effects(effects: SliceEffects) -> None:
     validate_rgb_color("effects.highlight_color", effects.highlight_color)
 
 
+def _is_power_of_two(value: int) -> bool:
+    return value > 0 and (value & (value - 1)) == 0
+
+
+def validate_random_block_count(num_blocks: int) -> None:
+    if num_blocks < 4:
+        raise ValueError("num_blocks for layout='random' must be at least 4.")
+
+    if not _is_power_of_two(num_blocks):
+        raise ValueError(
+            "num_blocks for layout='random' must be a power of 2 (for example "
+            "4, 8, 16, 32, 64, or 128 total blocks)."
+        )
+
+
 @dataclass(frozen=True)
 class TimesliceSpec:
-    """TimesliceSpec is the user's render intent."""
+    """TimesliceSpec is the user's render intent.
+
+    `layout="bands"` uses the original straight-band planner controlled by
+    `orientation`. `layout="diagonal"`, `layout="spiral"`, and
+    `layout="circular"` use built-in mask-based layouts. `layout="random"`
+    uses a seeded random block grid. `layout="mask"` expects `layout_mask` to
+    be a 2D array matching the input image height and width.
+    """
 
     orientation: Orientation = "vertical"
+    layout: LayoutMode = "bands"
     num_slices: int | None = None
+    num_blocks: int | None = None
     reverse_time: bool = False
+    random_seed: int | None = None
     effects: SliceEffects | None = None
+    layout_mask: npt.ArrayLike | None = None
+
+
+def validate_timeslice_spec(spec: TimesliceSpec) -> None:
+    if spec.layout not in _VALID_LAYOUTS:
+        raise ValueError(
+            "layout must be one of bands, diagonal, spiral, circular, random, or mask."
+        )
+    if spec.num_slices is not None and spec.num_slices < 1:
+        raise ValueError("num_slices must be at least 1.")
+    if spec.layout == "bands" and spec.orientation not in ("vertical", "horizontal"):
+        raise ValueError("orientation must be 'vertical' or 'horizontal'.")
+    if spec.layout == "random" and spec.num_slices is not None:
+        raise ValueError(
+            "num_slices cannot be used with layout='random'; use num_blocks instead."
+        )
+    if spec.layout != "random" and spec.num_blocks is not None:
+        raise ValueError("num_blocks can only be used when layout='random'.")
+    if spec.layout != "random" and spec.random_seed is not None:
+        raise ValueError("random_seed can only be used when layout='random'.")
+    if spec.layout != "bands" and spec.effects is not None:
+        raise ValueError(
+            "Slice effects are currently supported only for layout='bands'."
+        )
+    if spec.layout == "random":
+        validate_random_block_count(
+            spec.num_blocks if spec.num_blocks is not None else 4
+        )
+    if spec.layout == "mask" and spec.layout_mask is None:
+        raise ValueError("layout_mask is required when layout='mask'.")
+    if spec.layout != "mask" and spec.layout_mask is not None:
+        raise ValueError("layout_mask can only be used when layout='mask'.")
+    if spec.effects is not None:
+        validate_slice_effects(spec.effects)
 
 
 @dataclass(frozen=True)
@@ -107,8 +168,11 @@ class SliceBand:
 class TimeslicePlan:
     """TimeslicePlan is the full slice layout."""
 
-    orientation: Orientation
-    bands: list[SliceBand]
+    layout: LayoutMode = "bands"
+    orientation: Orientation | None = None
+    bands: list[SliceBand] = field(default_factory=list)
+    slice_map: npt.NDArray[np.int_] | None = None
+    slice_frame_indices: list[int] | None = None
 
 
 @dataclass(frozen=True)

@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Protocol, Sequence
 
 from pytimeslice.domain.compositor import build_timeslice
+from pytimeslice.domain.planner import max_supported_slices
 from pytimeslice.domain.models import (
     CompositeResult,
     RGBImage,
     TimesliceSpec,
-    validate_slice_effects,
+    validate_timeslice_spec,
 )
 from pytimeslice.shared.types import ResizeMode
 
@@ -245,8 +246,7 @@ class RenderTimesliceService:
         self._image_writer = image_writer
 
     def _validate_request(self, request: RenderRequest) -> None:
-        if request.spec.effects is not None:
-            validate_slice_effects(request.spec.effects)
+        validate_timeslice_spec(request.spec)
 
     def _load_paths_and_images(
         self,
@@ -347,10 +347,14 @@ class RenderTimesliceService:
             raise ValueError("No image writer configured.")
         if duration_ms <= 0:
             raise ValueError("duration_ms must be greater than 0.")
+        if request.spec.layout == "random":
+            raise ValueError(
+                "Progression GIF is not currently supported for layout='random'."
+            )
 
         paths, images = self._load_paths_and_images(request)
         height, width, _ = images[0].shape
-        span = width if request.spec.orientation == "vertical" else height
+        span = max_supported_slices(height=height, width=width, spec=request.spec)
         base_slice_counts = _progression_slice_counts(
             num_images=len(images),
             span=span,

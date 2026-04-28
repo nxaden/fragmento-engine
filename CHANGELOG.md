@@ -8,6 +8,18 @@ releases begin.
 
 ## [Unreleased]
 
+### Added
+
+- Mask-based layout planning in the domain layer with built-in `diagonal`,
+  `spiral`, `circular`, and `random` layouts plus user-defined `layout_mask`
+  support through `TimesliceSpec`.
+- Progression GIF support for mask-based layouts through the existing
+  application workflow.
+- CLI support for `--layout`, file-backed `--layout-mask` inputs, and seeded
+  random block layouts.
+- Random block layouts now accept rectangular power-of-two totals such as
+  `128`, not just square totals such as `64` or `256`.
+
 ### Changed
 
 - Archived low-value legacy docs and retired standalone requirements into the

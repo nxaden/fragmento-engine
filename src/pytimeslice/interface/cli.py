@@ -5,8 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
+from PIL import Image
+
 from pytimeslice import render_folder_to_file, render_progression_gif
 from pytimeslice import SliceEffects, TimesliceSpec
+from pytimeslice.domain.models import validate_timeslice_spec
 
 
 def _parse_non_negative_int(value: str) -> int:
@@ -96,6 +101,69 @@ def _build_effects(args: argparse.Namespace) -> SliceEffects | None:
     )
 
 
+def _load_layout_mask(mask_file: Path) -> npt.NDArray[np.float64]:
+    if not mask_file.exists():
+        raise ValueError(f"Layout mask file does not exist: {mask_file}")
+
+    if mask_file.suffix.lower() == ".npy":
+        loaded = np.load(mask_file, allow_pickle=False)
+    else:
+        try:
+            with Image.open(mask_file) as opened:
+                loaded = np.array(opened.convert("F"), dtype=np.float64)
+        except OSError as exc:
+            raise ValueError(
+                "Layout mask must be a readable .npy file or single-channel image."
+            ) from exc
+
+    if loaded.ndim != 2:
+        raise ValueError("Layout mask must be a 2D array or single-channel image.")
+
+    return loaded.astype(np.float64, copy=False)
+
+
+def _build_spec(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> TimesliceSpec:
+    effects = _build_effects(args)
+
+    if args.layout != "bands" and effects is not None:
+        parser.error("Slice effects are currently supported only with --layout bands.")
+
+    if args.layout != "bands" and args.orientation != "vertical":
+        parser.error("--orientation is currently supported only with --layout bands.")
+
+    layout_mask: npt.NDArray[np.float64] | None = None
+    if args.layout == "mask":
+        if args.layout_mask is None:
+            parser.error("--layout-mask is required when --layout mask is used.")
+        try:
+            layout_mask = _load_layout_mask(args.layout_mask)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif args.layout_mask is not None:
+        parser.error("--layout-mask can only be used when --layout mask is selected.")
+
+    spec = TimesliceSpec(
+        orientation=args.orientation,
+        layout=args.layout,
+        num_slices=args.slices,
+        num_blocks=args.random_blocks,
+        reverse_time=args.reverse_time,
+        random_seed=args.random_seed,
+        effects=effects,
+        layout_mask=layout_mask,
+    )
+
+    try:
+        validate_timeslice_spec(spec)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    return spec
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the argparse parser for the `pytimeslice` command."""
     parser = argparse.ArgumentParser(
@@ -104,9 +172,48 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("input_folder", type=Path)
     parser.add_argument("output_file", type=Path, nargs="?", default=None)
     parser.add_argument(
+        "--layout",
+        choices=["bands", "diagonal", "spiral", "circular", "random", "mask"],
+        default="bands",
+        help=(
+            "Layout strategy: straight bands, a built-in diagonal, spiral, or "
+            "circular mask, a random block grid, or a user-defined mask loaded "
+            "from --layout-mask."
+        ),
+    )
+    parser.add_argument(
+        "--random-blocks",
+        type=_parse_positive_int,
+        default=None,
+        metavar="COUNT",
+        help=(
+            "Total block count for --layout random. Must be at least 4 and a "
+            "power of 2; the renderer chooses a rectangular power-of-two grid "
+            "that fits the image."
+        ),
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=None,
+        metavar="SEED",
+        help="Optional RNG seed for --layout random.",
+    )
+    parser.add_argument(
+        "--layout-mask",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "User-defined layout mask for --layout mask. Supports .npy files "
+            "or grayscale image files."
+        ),
+    )
+    parser.add_argument(
         "--orientation",
         choices=["vertical", "horizontal"],
         default="vertical",
+        help="Band direction for --layout bands.",
     )
     parser.add_argument("--slices", type=_parse_positive_int, default=None)
     parser.add_argument(
@@ -218,13 +325,9 @@ def main() -> None:
     """Run the command-line interface."""
     parser = build_parser()
     args = parser.parse_args()
-
-    spec = TimesliceSpec(
-        orientation=args.orientation,
-        num_slices=args.slices,
-        reverse_time=args.reverse_time,
-        effects=_build_effects(args),
-    )
+    spec = _build_spec(args, parser)
+    if args.progression_gif and spec.layout == "random":
+        parser.error("Progression GIF is not currently supported with --layout random.")
 
     if args.progression_gif:
         gif_response = render_progression_gif(

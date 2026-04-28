@@ -307,6 +307,10 @@ def _apply_slice_effects(
 
     if len(plan.bands) < 2:
         return
+    if plan.orientation is None:
+        raise ValueError("Band layouts require an orientation.")
+
+    orientation = plan.orientation
 
     for left_band, right_band in zip(plan.bands, plan.bands[1:]):
         boundary = left_band.end
@@ -323,7 +327,7 @@ def _apply_slice_effects(
                 output=output,
                 left_frame=left_frame,
                 right_frame=right_frame,
-                orientation=plan.orientation,
+                orientation=orientation,
                 boundary=boundary,
                 left_extent=feather_left,
                 right_extent=feather_right,
@@ -335,7 +339,7 @@ def _apply_slice_effects(
         if (shadow_left > 0 or shadow_right > 0) and effects.shadow_opacity > 0.0:
             _apply_boundary_shadow(
                 output=output,
-                orientation=plan.orientation,
+                orientation=orientation,
                 boundary=boundary,
                 left_extent=shadow_left,
                 right_extent=shadow_right,
@@ -350,7 +354,7 @@ def _apply_slice_effects(
         ) and effects.highlight_opacity > 0.0:
             _apply_boundary_highlight(
                 output=output,
-                orientation=plan.orientation,
+                orientation=orientation,
                 boundary=boundary,
                 left_extent=highlight_left,
                 right_extent=highlight_right,
@@ -363,14 +367,14 @@ def _apply_slice_effects(
             border_colors = _resolve_border_colors(
                 left_frame=left_frame,
                 right_frame=right_frame,
-                orientation=plan.orientation,
+                orientation=orientation,
                 boundary=boundary,
                 width=effects.border_width,
                 effects=effects,
             )
             _apply_boundary_border(
                 output=output,
-                orientation=plan.orientation,
+                orientation=orientation,
                 boundary=boundary,
                 width=effects.border_width,
                 colors=border_colors,
@@ -387,15 +391,31 @@ def apply_timeslice_plan(
     height, width, _ = _validate_images(images)
     output = np.zeros((height, width, 3), dtype=np.uint8)
 
-    for band in plan.bands:
-        frame = images[band.frame_index]
+    if plan.layout == "bands":
+        for band in plan.bands:
+            frame = images[band.frame_index]
 
-        if plan.orientation == "vertical":
-            output[:, band.start : band.end, :] = frame[:, band.start : band.end, :]
-        else:
-            output[band.start : band.end, :, :] = frame[band.start : band.end, :, :]
+            if plan.orientation == "vertical":
+                output[:, band.start : band.end, :] = frame[:, band.start : band.end, :]
+            else:
+                output[band.start : band.end, :, :] = frame[band.start : band.end, :, :]
+    else:
+        if plan.slice_map is None or plan.slice_frame_indices is None:
+            raise ValueError(
+                "Mask-based plans must define slice_map and slice_frame_indices."
+            )
+
+        for slice_index, frame_index in enumerate(plan.slice_frame_indices):
+            pixel_mask = plan.slice_map == slice_index
+            if not np.any(pixel_mask):
+                continue
+            output[pixel_mask] = images[frame_index][pixel_mask]
 
     if effects is not None:
+        if plan.layout != "bands":
+            raise ValueError(
+                "Slice effects are currently supported only for layout='bands'."
+            )
         _apply_slice_effects(
             output=output,
             images=images,
@@ -403,7 +423,14 @@ def apply_timeslice_plan(
             effects=effects,
         )
 
-    used_frame_indices = sorted({band.frame_index for band in plan.bands})
+    if plan.layout == "bands":
+        used_frame_indices = sorted({band.frame_index for band in plan.bands})
+    else:
+        used_frame_indices = (
+            sorted(set(plan.slice_frame_indices))
+            if plan.slice_frame_indices is not None
+            else []
+        )
 
     return CompositeResult(
         image=output,

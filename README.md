@@ -11,6 +11,7 @@
 
 - Render composite timeslice images from ordered image sequences
 - Choose vertical or horizontal slicing, slice count, and time direction
+- Use mask-based layouts such as diagonal, spiral, circular, random block grids, or user-defined pixel-order masks
 - Normalize source frames by resizing, cropping, or fitting them to a common size
 - Add slice-boundary effects including borders, dividers, shadows, highlights, feathering, and curve shaping
 - Export still images or animated progression GIFs
@@ -107,6 +108,41 @@ saved = render_folder_to_file(
 print(saved.output_file)
 ```
 
+Mask-based layouts are available from the Python API:
+
+```python
+import numpy as np
+
+from pytimeslice import TimesliceSpec, render_images
+
+diagonal = render_images(
+    images=frames,
+    spec=TimesliceSpec(layout="diagonal", num_slices=12),
+)
+
+circular = render_images(
+    images=frames,
+    spec=TimesliceSpec(layout="circular", num_slices=12),
+)
+
+random_blocks = render_images(
+    images=frames,
+    spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+)
+
+custom = render_images(
+    images=frames,
+    spec=TimesliceSpec(
+        layout="mask",
+        num_slices=12,
+        layout_mask=np.linspace(0.0, 1.0, frames[0].shape[0] * frames[0].shape[1]).reshape(
+            frames[0].shape[0],
+            frames[0].shape[1],
+        ),
+    ),
+)
+```
+
 ## CLI Usage
 
 A CLI interface is provided on top of the engine so a folder of source
@@ -134,6 +170,32 @@ pytimeslice ./frames \
   --highlight-opacity 0.2 \
   --feather 6 \
   --curve smoothstep
+```
+
+Built-in mask layouts are also available from the CLI:
+
+```sh
+pytimeslice ./frames \
+  --layout diagonal \
+  --slices 24
+
+pytimeslice ./frames \
+  --layout circular \
+  --slices 24
+
+pytimeslice ./frames \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7
+```
+
+User-defined masks can be loaded from a grayscale image or `.npy` file:
+
+```sh
+pytimeslice ./frames \
+  --layout mask \
+  --layout-mask ./masks/spiral-guide.npy \
+  --slices 24
 ```
 
 More CLI recipes, including overlay practice commands, live in

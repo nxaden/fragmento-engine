@@ -38,6 +38,22 @@ saved = render_folder_to_file(Path("./frames"))
 print(saved.output_file)
 ```
 
+Built-in mask layouts are also available from the Python API:
+
+```python
+from pytimeslice import TimesliceSpec, render_images
+
+diagonal = render_images(
+    images=frames,
+    spec=TimesliceSpec(layout="diagonal", num_slices=12),
+)
+
+random_blocks = render_images(
+    images=frames,
+    spec=TimesliceSpec(layout="random", num_blocks=128, random_seed=7),
+)
+```
+
 ## CLI
 
 ```sh
@@ -55,4 +71,14 @@ pytimeslice ./frames \
   --gif-smooth-loop \
   --gif-frame-duration-ms 180 \
   --orientation vertical
+```
+
+Other layout examples:
+
+```sh
+pytimeslice ./frames --layout circular --slices 24
+
+pytimeslice ./frames --layout random --random-blocks 128 --random-seed 7
+
+pytimeslice ./frames --layout mask --layout-mask ./masks/layout.npy --slices 24
 ```

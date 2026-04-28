@@ -170,6 +170,40 @@ pytimeslice ./frames \
   --curve smoothstep
 ```
 
+## Diagonal Layout
+
+```sh
+pytimeslice ./frames ./out/diagonal-layout.jpg \
+  --layout diagonal \
+  --slices 24
+```
+
+## Circular Layout
+
+```sh
+pytimeslice ./frames ./out/circular-layout.jpg \
+  --layout circular \
+  --slices 24
+```
+
+## Random Block Layout
+
+```sh
+pytimeslice ./frames ./out/random-layout.jpg \
+  --layout random \
+  --random-blocks 128 \
+  --random-seed 7
+```
+
+## User-Defined Mask Layout
+
+```sh
+pytimeslice ./frames ./out/custom-mask-layout.jpg \
+  --layout mask \
+  --layout-mask ./masks/layout.npy \
+  --slices 24
+```
+
 ## Practice Tip
 
 Keep the same input frames and output dimensions, then change only one option at

@@ -12,7 +12,7 @@ from pytimeslice.application.services import (
     RenderTimesliceService,
 )
 from pytimeslice.domain.models import RGBImage, SliceEffects, TimesliceSpec
-from pytimeslice.interface.cli import build_parser
+from pytimeslice.interface.cli import _build_spec, build_parser
 
 
 def _solid_frame(value: int, *, width: int = 8, height: int = 2) -> RGBImage:
@@ -263,6 +263,68 @@ def test_render_progression_gif_can_use_smooth_loop_slice_counts(
     assert duration_ms == 120
 
 
+def test_render_progression_gif_supports_mask_based_layouts(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(3)]
+    images = [_solid_frame(index * 10, width=2, height=2) for index in range(3)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+
+    response = service.render_progression_gif_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(layout="diagonal"),
+        ),
+        duration_ms=90,
+    )
+
+    assert response.base_slice_counts == [1, 2, 4]
+    assert response.emitted_slice_counts == [1, 2, 4]
+    assert response.peak_result.plan.layout == "diagonal"
+    assert response.peak_result.plan.slice_map is not None
+
+    assert len(writer.saved_gifs) == 1
+    frames, _, duration_ms = writer.saved_gifs[0]
+    assert len(frames) == 3
+    assert duration_ms == 90
+
+
+def test_render_progression_gif_rejects_random_layout_before_loading_images(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    loader = RecordingLoader(
+        paths=[input_folder / "001.png"],
+        images=[_solid_frame(0, width=4, height=4)],
+    )
+    service = RenderTimesliceService(
+        sequence_loader=loader,
+        image_writer=RecordingWriter(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Progression GIF is not currently supported for layout='random'.",
+    ):
+        service.render_progression_gif_to_file(
+            RenderRequest(
+                input_folder=input_folder,
+                spec=TimesliceSpec(layout="random", num_blocks=4),
+            ),
+            duration_ms=120,
+        )
+
+    assert loader.get_image_paths_calls == 0
+    assert loader.load_images_calls == 0
+
+
 def test_service_rejects_invalid_effects_before_loading_images(
     tmp_path: Path,
 ) -> None:
@@ -334,6 +396,200 @@ def test_cli_output_file_is_optional_for_progression_gif() -> None:
     assert args.progression_gif is True
     assert args.gif_frame_duration_ms == 180
     assert args.gif_smooth_loop is True
+
+
+def test_cli_builds_diagonal_layout_spec() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "diagonal",
+            "--slices",
+            "6",
+            "--reverse-time",
+        ]
+    )
+
+    spec = _build_spec(args, parser)
+
+    assert spec == TimesliceSpec(
+        orientation="vertical",
+        layout="diagonal",
+        num_slices=6,
+        reverse_time=True,
+    )
+
+
+def test_cli_builds_circular_layout_spec() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "circular",
+            "--slices",
+            "6",
+        ]
+    )
+
+    spec = _build_spec(args, parser)
+
+    assert spec == TimesliceSpec(
+        orientation="vertical",
+        layout="circular",
+        num_slices=6,
+    )
+
+
+def test_cli_builds_random_layout_spec() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--random-blocks",
+            "16",
+            "--random-seed",
+            "7",
+        ]
+    )
+
+    spec = _build_spec(args, parser)
+
+    assert spec == TimesliceSpec(
+        orientation="vertical",
+        layout="random",
+        num_blocks=16,
+        random_seed=7,
+    )
+
+
+def test_cli_accepts_rectangular_power_of_two_random_block_counts() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--random-blocks",
+            "128",
+        ]
+    )
+
+    spec = _build_spec(args, parser)
+
+    assert spec == TimesliceSpec(
+        orientation="vertical",
+        layout="random",
+        num_blocks=128,
+    )
+
+
+def test_cli_loads_user_defined_mask_layout_from_npy(tmp_path: Path) -> None:
+    parser = build_parser()
+    mask_file = tmp_path / "layout-mask.npy"
+    expected_mask = np.array([[0.0, 2.0], [3.0, 1.0]], dtype=np.float64)
+    np.save(mask_file, expected_mask)
+
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "mask",
+            "--layout-mask",
+            str(mask_file),
+            "--slices",
+            "2",
+        ]
+    )
+
+    spec = _build_spec(args, parser)
+
+    assert spec.layout == "mask"
+    assert spec.layout_mask is not None
+    assert np.array_equal(spec.layout_mask, expected_mask)
+
+
+def test_cli_requires_layout_mask_for_mask_layout() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "mask",
+            "--slices",
+            "2",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _build_spec(args, parser)
+
+
+def test_cli_rejects_slices_for_random_layout() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--slices",
+            "8",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _build_spec(args, parser)
+
+
+def test_cli_rejects_invalid_random_block_count() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "random",
+            "--random-blocks",
+            "12",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _build_spec(args, parser)
+
+
+def test_cli_rejects_effects_for_non_band_layouts() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout",
+            "spiral",
+            "--border",
+            "1",
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _build_spec(args, parser)
+
+
+def test_cli_rejects_layout_mask_without_mask_layout(tmp_path: Path) -> None:
+    parser = build_parser()
+    mask_file = tmp_path / "layout-mask.npy"
+    np.save(mask_file, np.array([[0.0]], dtype=np.float64))
+    args = parser.parse_args(
+        [
+            "frames",
+            "--layout-mask",
+            str(mask_file),
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        _build_spec(args, parser)
 
 
 def test_cli_rejects_negative_effect_widths() -> None:
