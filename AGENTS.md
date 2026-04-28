@@ -54,7 +54,7 @@ If you change a public return type or add a public helper:
 
 - update `__init__.py`
 - update `README.md`
-- update `docs/API_REFERENCE.md`
+- update the public API docstrings rendered under `docs/api/`
 
 ## Testing Rules
 

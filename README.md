@@ -7,23 +7,14 @@
 `pytimeslice` is a Python image processing library for building composite
 [timeslice](http://medium.com/@blech/a-slice-of-time-1c70f1b06665) images from ordered frame sequences.
 
-## Status
-
-This project is under active development.
-
 ## Features
 
-Current focus includes:
-
-- loading ordered image sequences
-- resizing or cropping source images to a consistent frame size
-- vertical or horizontal time-slice rendering
-- configurable slice count
-- optional reverse-time rendering
-- optional slice boundary effects such as borders, auto or gradient dividers,
-  shadows, highlights, feathering, and curve shaping
-- application-layer render workflows
-- infrastructure adapters for PIL-based loading and saving
+- Render composite timeslice images from ordered image sequences
+- Choose vertical or horizontal slicing, slice count, and time direction
+- Normalize source frames by resizing, cropping, or fitting them to a common size
+- Add slice-boundary effects including borders, dividers, shadows, highlights, feathering, and curve shaping
+- Export still images or animated progression GIFs
+- Use as either a Python library or a command-line tool
 
 ## Architecture
 
@@ -36,28 +27,6 @@ Current focus includes:
 
 See [the hosted documentation](https://nxaden.github.io/pytimeslice/) for the
 user guides and generated API reference.
-
-## Project Structure
-
-```text
-src/
-└── pytimeslice/
-    ├── __init__.py
-    ├── app.py
-    ├── application/
-    │   └── services.py
-    ├── domain/
-    │   ├── compositor.py
-    │   ├── models.py
-    │   └── planner.py
-    ├── infrastructure/
-    │   ├── image_loader.py
-    │   └── image_writer.py
-    ├── interface/
-    │   └── cli.py
-    └── shared/
-        └── types.py
-```
 
 ## Installation
 
@@ -140,7 +109,7 @@ print(saved.output_file)
 
 ## CLI Usage
 
-A CLI interface can be provided on top of the engine so a folder of source
+A CLI interface is provided on top of the engine so a folder of source
 frames can be rendered directly from the command line.
 
 ```sh
@@ -167,22 +136,6 @@ pytimeslice ./frames \
   --curve smoothstep
 ```
 
-Progression GIF example:
-
-```sh
-pytimeslice ./frames \
-  --progression-gif \
-  --gif-smooth-loop \
-  --gif-frame-duration-ms 180 \
-  --orientation vertical \
-  --border 4 \
-  --border-color-mode gradient \
-  --shadow 8 \
-  --highlight 4 \
-  --feather 6 \
-  --curve smoothstep
-```
-
 More CLI recipes, including overlay practice commands, live in
 [the hosted docs](https://nxaden.github.io/pytimeslice/USAGE_EXAMPLES/).
 
@@ -203,24 +156,15 @@ Release notes live in
 
 ## Docs
 
-The human-facing docs site is built with MkDocs and generated API reference
+The docs site is built with MkDocs and generated API reference
 pages from the package docstrings.
 
-Hosted docs are intended to live at
+Hosted docs are live at
 [nxaden.github.io/pytimeslice](https://nxaden.github.io/pytimeslice/).
+
+You can also serve them locally:
 
 ```sh
 make docs-build
 make docs-serve
 ```
-
-## Roadmap
-
-Planned improvements include:
-
-- preview workflows
-- metadata export
-- batch rendering
-- additional frame selection strategies
-- richer public API
-- PyPI packaging and publishing
