@@ -1,23 +1,15 @@
 # pytimeslice
 
-![Timeslice](assets/timeslice.gif)
+| ![Timeslice](assets/timeslice.gif) |
+|:--:| 
+| *An animated Timeslice of the 401 Highway in Toronto created from `pytimeslice`* |
 
-`pytimeslice` is a Python image-processing library for building composite
-timeslice images from ordered frame sequences.
-
-The project is designed as a reusable Python engine first, with thin interfaces such as a CLI layered on top.
+`pytimeslice` is a Python image processing library for building composite
+[timeslice](http://medium.com/@blech/a-slice-of-time-1c70f1b06665) images from ordered frame sequences.
 
 ## Status
 
 This project is under active development.
-
-## Goals
-
-- deterministic rendering
-- testable core logic
-- clean separation between domain, application, infrastructure, and interface layers
-- reusable engine for multiple interfaces
-- library friendly API with CLI support
 
 ## Features
 
@@ -226,10 +218,9 @@ make docs-serve
 
 Planned improvements include:
 
-preview workflows
-metadata export
-batch rendering
-additional frame selection strategies
-richer public API
-PyPI packaging and publishing
-web interface support
+- preview workflows
+- metadata export
+- batch rendering
+- additional frame selection strategies
+- richer public API
+- PyPI packaging and publishing
