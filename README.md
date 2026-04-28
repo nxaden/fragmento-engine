@@ -216,6 +216,26 @@ print(layout.mask_for_slot(0).shape)
 slot_preview = layout.render_slot_preview(0)
 ```
 
+That metadata can be serialized for a web client or saved as JSON:
+
+```python
+import json
+
+from pytimeslice import (
+    deserialize_layout,
+    export_layout_json,
+    import_layout_json,
+    serialize_layout,
+)
+
+payload = serialize_layout(layout, include_preview_image=False)
+json_blob = json.dumps(payload)
+restored = deserialize_layout(json.loads(json_blob))
+
+saved_file = export_layout_json(layout, "./out/layout-metadata.json")
+loaded = import_layout_json(saved_file)
+```
+
 One-shot render from an explicit list of paths:
 
 ```python

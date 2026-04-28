@@ -142,6 +142,25 @@ render as black in the preview image. `describe_layout(...)` exposes the stable
 slot map, per-slot bounds, and a color-coded preview image that a future client
 can use before any slot content is assigned.
 
+The same metadata can be serialized into a JSON-safe transport payload:
+
+```python
+import json
+
+from pytimeslice import (
+    deserialize_layout,
+    export_layout_json,
+    import_layout_json,
+    serialize_layout,
+)
+
+payload = serialize_layout(layout, include_preview_image=False)
+round_trip = deserialize_layout(json.loads(json.dumps(payload)))
+
+saved_file = export_layout_json(layout, "./out/layout-metadata.json")
+loaded = import_layout_json(saved_file)
+```
+
 ## CLI
 
 ```sh

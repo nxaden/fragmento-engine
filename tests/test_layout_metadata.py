@@ -1,7 +1,17 @@
+import json
+
 import numpy as np
 import pytest
 
-from pytimeslice import TimesliceSpec, create_manual_timeslice, describe_layout
+from pytimeslice import (
+    TimesliceSpec,
+    create_manual_timeslice,
+    deserialize_layout,
+    describe_layout,
+    export_layout_json,
+    import_layout_json,
+    serialize_layout,
+)
 
 
 def test_describe_layout_builds_band_slot_metadata() -> None:
@@ -80,3 +90,80 @@ def test_manual_canvas_exposes_shared_layout_description() -> None:
     assert canvas.layout_description.plan == canvas.plan
     assert canvas.layout_description.preview_image.shape == (10, 2, 3)
     assert canvas.layout_description.slot_map.shape == (10, 2)
+
+
+def test_serialize_layout_round_trips_through_json() -> None:
+    layout = describe_layout(
+        TimesliceSpec(layout="diagonal", num_slices=3),
+        width=2,
+        height=2,
+    )
+
+    payload = serialize_layout(layout)
+    serialized = json.dumps(payload)
+    restored = deserialize_layout(json.loads(serialized))
+
+    assert restored.spec == layout.spec
+    assert restored.plan.layout == layout.plan.layout
+    assert restored.plan.orientation == layout.plan.orientation
+    assert restored.plan.bands == layout.plan.bands
+    assert restored.plan.slice_frame_indices == layout.plan.slice_frame_indices
+    assert np.array_equal(restored.plan.slice_map, layout.plan.slice_map)
+    assert restored.slot_count == layout.slot_count
+    assert np.array_equal(restored.slot_map, layout.slot_map)
+    assert np.array_equal(restored.preview_image, layout.preview_image)
+    assert restored.slots == layout.slots
+
+
+def test_serialize_layout_can_omit_preview_image() -> None:
+    layout = describe_layout(
+        TimesliceSpec(layout="random", num_blocks=8, random_seed=7),
+        width=8,
+        height=4,
+    )
+
+    payload = serialize_layout(layout, include_preview_image=False)
+
+    assert payload["preview_image"] is None
+
+    restored = deserialize_layout(payload)
+    assert np.array_equal(restored.preview_image, layout.preview_image)
+
+
+def test_export_and_import_layout_json_round_trip(tmp_path) -> None:
+    layout = describe_layout(
+        TimesliceSpec(orientation="vertical", num_slices=3),
+        width=6,
+        height=2,
+    )
+
+    output_file = export_layout_json(
+        layout,
+        tmp_path / "saved-layout",
+        include_preview_image=False,
+    )
+    restored = import_layout_json(output_file)
+
+    assert output_file.suffix == ".json"
+    assert np.array_equal(restored.slot_map, layout.slot_map)
+    assert restored.plan == layout.plan
+    assert restored.slots == layout.slots
+
+
+def test_deserialize_layout_rebuilds_mask_spec_from_serialized_slot_map() -> None:
+    layout = describe_layout(
+        TimesliceSpec(
+            layout="mask",
+            num_slices=2,
+            layout_mask=np.array([[0.0, 0.1], [0.9, 1.0]], dtype=np.float64),
+        ),
+        width=2,
+        height=2,
+    )
+
+    restored = deserialize_layout(serialize_layout(layout))
+
+    assert restored.spec.layout == "mask"
+    assert restored.spec.layout_mask is not None
+    replayed = describe_layout(restored.spec, width=2, height=2)
+    assert np.array_equal(replayed.slot_map, layout.slot_map)

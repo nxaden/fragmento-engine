@@ -25,6 +25,9 @@ releases begin.
 - Client-facing layout metadata through `describe_layout(...)`, including
   slot maps, per-slot bounds, color-coded preview images, and shared metadata
   on manual canvases.
+- JSON-safe layout serialization helpers for client transport and file
+  round-tripping through `serialize_layout(...)`, `deserialize_layout(...)`,
+  `export_layout_json(...)`, and `import_layout_json(...)`.
 - CLI support for manual assignment with `--assigned-path`, `--slot-path`, and
   `--manual-empty`, including partial black-slot previews and configurable
   manual canvas dimensions.

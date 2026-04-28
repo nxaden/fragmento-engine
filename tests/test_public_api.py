@@ -13,7 +13,10 @@ def test_manual_assignment_helpers_are_exposed() -> None:
     assert pytimeslice.LayoutSlot is not None
     assert pytimeslice.ManualTimesliceCanvas is not None
     assert pytimeslice.create_manual_timeslice is not None
+    assert pytimeslice.deserialize_layout is not None
     assert pytimeslice.describe_layout is not None
+    assert pytimeslice.export_layout_json is not None
+    assert pytimeslice.import_layout_json is not None
     assert pytimeslice.assign_image_to_slot is not None
     assert pytimeslice.assign_path_to_slot is not None
     assert pytimeslice.render_animation is not None
@@ -22,3 +25,4 @@ def test_manual_assignment_helpers_are_exposed() -> None:
     assert pytimeslice.render_random_gif is not None
     assert pytimeslice.render_progression_video is not None
     assert pytimeslice.render_random_video is not None
+    assert pytimeslice.serialize_layout is not None
