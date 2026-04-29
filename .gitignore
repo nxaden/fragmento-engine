@@ -10,6 +10,7 @@ build/
 site/
 out/
 .archive/
+.local/
 .DS_Store
 *.egg-info/
 /*.jpg

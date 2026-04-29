@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol, Sequence
+from typing import Literal, Protocol
 
 from pytimeslice.domain.compositor import build_timeslice
 from pytimeslice.domain.planner import max_supported_slices
@@ -21,6 +22,11 @@ from pytimeslice.shared.types import ResizeMode
 AnimationMode = Literal["progression", "random"]
 AnimationFormat = Literal["gif", "mp4", "mov"]
 AnimationValueKind = Literal["slice_count", "seed"]
+AnimationProgressStage = Literal[
+    "loading_inputs",
+    "rendering_frames",
+    "encoding_output",
+]
 
 
 class ImageSequenceLoader(Protocol):
@@ -183,6 +189,24 @@ class AnimationRenderResponse:
     output_file: Path
     base_values: list[int]
     emitted_values: list[int]
+
+
+@dataclass(frozen=True)
+class AnimationRenderProgress:
+    """Progress update emitted while rendering an animation export."""
+
+    mode: AnimationMode
+    output_format: AnimationFormat
+    value_kind: AnimationValueKind
+    stage: AnimationProgressStage
+    progress: float
+    completed_forward_frames: int
+    total_forward_frames: int
+    emitted_frame_count: int
+    current_value: int | None = None
+
+
+AnimationProgressCallback = Callable[[AnimationRenderProgress], None]
 
 
 @dataclass(frozen=True)
@@ -403,6 +427,38 @@ def _animation_output_label(mode: AnimationMode) -> str:
     return "progression" if mode == "progression" else "random-shuffle"
 
 
+def _emit_animation_progress(
+    progress_callback: AnimationProgressCallback | None,
+    *,
+    mode: AnimationMode,
+    output_format: AnimationFormat,
+    value_kind: AnimationValueKind,
+    stage: AnimationProgressStage,
+    progress: float,
+    completed_forward_frames: int,
+    total_forward_frames: int,
+    emitted_frame_count: int,
+    current_value: int | None = None,
+) -> None:
+    if progress_callback is None:
+        return
+
+    clamped_progress = max(0.0, min(1.0, progress))
+    progress_callback(
+        AnimationRenderProgress(
+            mode=mode,
+            output_format=output_format,
+            value_kind=value_kind,
+            stage=stage,
+            progress=clamped_progress,
+            completed_forward_frames=completed_forward_frames,
+            total_forward_frames=total_forward_frames,
+            emitted_frame_count=emitted_frame_count,
+            current_value=current_value,
+        )
+    )
+
+
 class RenderTimesliceService:
     """Application service for rendering a timeslice from an image folder.
 
@@ -600,6 +656,7 @@ class RenderTimesliceService:
         loops: int = 1,
         smooth_loop: bool = False,
         frame_count: int = 8,
+        progress_callback: AnimationProgressCallback | None = None,
     ) -> AnimationRenderResponse:
         """Render an animation export and save it to disk."""
         if self._image_writer is None:
@@ -626,16 +683,42 @@ class RenderTimesliceService:
         )
         emitted_once = _smooth_loop_values(base_values) if smooth_loop else base_values
         emitted_values = _repeat_animation_values(emitted_once, loops)
+        value_kind = _animation_value_kind(mode)
 
-        forward_results = [
-            self._result_for_animation_value(
+        _emit_animation_progress(
+            progress_callback,
+            mode=mode,
+            output_format=output_format,
+            value_kind=value_kind,
+            stage="loading_inputs",
+            progress=0.08,
+            completed_forward_frames=0,
+            total_forward_frames=len(base_values),
+            emitted_frame_count=len(emitted_values),
+        )
+
+        forward_results: list[CompositeResult] = []
+        for index, value in enumerate(base_values, start=1):
+            result = self._result_for_animation_value(
                 mode=mode,
                 images=images,
                 spec=request.spec,
                 value=value,
             )
-            for value in base_values
-        ]
+            forward_results.append(result)
+            render_progress = 0.1 + (0.78 * (index / len(base_values)))
+            _emit_animation_progress(
+                progress_callback,
+                mode=mode,
+                output_format=output_format,
+                value_kind=value_kind,
+                stage="rendering_frames",
+                progress=render_progress,
+                completed_forward_frames=index,
+                total_forward_frames=len(base_values),
+                emitted_frame_count=len(emitted_values),
+                current_value=value,
+            )
         results_by_value = {
             value: result for value, result in zip(base_values, forward_results)
         }
@@ -645,6 +728,19 @@ class RenderTimesliceService:
             output_file,
             output_format=output_format,
             label=_animation_output_label(mode),
+        )
+
+        _emit_animation_progress(
+            progress_callback,
+            mode=mode,
+            output_format=output_format,
+            value_kind=value_kind,
+            stage="encoding_output",
+            progress=0.96,
+            completed_forward_frames=len(base_values),
+            total_forward_frames=len(base_values),
+            emitted_frame_count=len(emitted_values),
+            current_value=base_values[-1],
         )
 
         if output_format == "gif":
@@ -663,7 +759,7 @@ class RenderTimesliceService:
         return AnimationRenderResponse(
             mode=mode,
             output_format=output_format,
-            value_kind=_animation_value_kind(mode),
+            value_kind=value_kind,
             first_forward_result=forward_results[0],
             last_forward_result=forward_results[-1],
             last_emitted_result=results_by_value[emitted_values[-1]],

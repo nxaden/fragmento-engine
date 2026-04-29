@@ -7,6 +7,7 @@ from PIL import Image
 import pytimeslice.app as app_module
 from pytimeslice import render_images
 from pytimeslice.application.services import (
+    AnimationRenderProgress,
     AnimationRenderResponse,
     ProgressionGifRenderResponse,
     ProgressionVideoRenderResponse,
@@ -387,6 +388,47 @@ def test_render_animation_to_file_exports_random_mov(
     assert len(frames) == 8
     assert saved_output == output_file
     assert fps == 12
+
+
+def test_render_animation_to_file_reports_progress_updates(
+    tmp_path: Path,
+) -> None:
+    input_folder = tmp_path / "frames"
+    input_folder.mkdir()
+    paths = [input_folder / f"{index:03}.png" for index in range(5)]
+    images = [_solid_frame(index * 10, width=16) for index in range(5)]
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=paths, images=images),
+        image_writer=writer,
+    )
+    updates: list[AnimationRenderProgress] = []
+
+    service.render_animation_to_file(
+        RenderRequest(
+            input_folder=input_folder,
+            spec=TimesliceSpec(orientation="vertical"),
+        ),
+        mode="progression",
+        output_format="gif",
+        frame_duration_ms=120,
+        smooth_loop=True,
+        progress_callback=updates.append,
+    )
+
+    assert [update.stage for update in updates] == [
+        "loading_inputs",
+        "rendering_frames",
+        "rendering_frames",
+        "rendering_frames",
+        "rendering_frames",
+        "encoding_output",
+    ]
+    assert updates[0].progress == pytest.approx(0.08)
+    assert updates[-1].progress == pytest.approx(0.96)
+    assert updates[-1].emitted_frame_count == 6
+    assert updates[-2].completed_forward_frames == 4
+    assert updates[-2].current_value == 8
 
 
 def test_render_progression_gif_uses_power_of_two_slice_counts(
