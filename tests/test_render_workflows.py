@@ -16,8 +16,16 @@ from pytimeslice.application.services import (
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
+    VideoRenderRequest,
+    VideoRenderResponse,
 )
-from pytimeslice.domain.models import RGBImage, SliceEffects, TimesliceSpec
+from pytimeslice.domain.models import (
+    RGBImage,
+    SliceEffects,
+    TimesliceSpec,
+    VideoFrameSelectionSpec,
+    select_video_frame_indices,
+)
 from pytimeslice.interface.cli import _build_spec, build_parser, main as cli_main
 
 
@@ -73,16 +81,43 @@ class RecordingWriter:
         self.saved_videos.append((images, output_file, fps))
 
 
+class RecordingVideoLoader:
+    def __init__(self, total_frames: int, frames: dict[int, RGBImage]) -> None:
+        self.total_frames = total_frames
+        self.frames = frames
+        self.count_frames_calls: list[Path] = []
+        self.load_frames_calls: list[tuple[Path, list[int], str]] = []
+
+    def count_frames(self, video_file: Path) -> int:
+        self.count_frames_calls.append(video_file)
+        return self.total_frames
+
+    def load_frames(
+        self,
+        video_file: Path,
+        frame_indices: list[int],
+        resize_mode: str = "crop",
+    ) -> list[RGBImage]:
+        self.load_frames_calls.append((video_file, list(frame_indices), resize_mode))
+        return [self.frames[index] for index in frame_indices]
+
+
 class RecordingRenderService:
     def __init__(
         self,
         response: RenderResponse,
         animation_response: AnimationRenderResponse | None = None,
+        video_response: VideoRenderResponse | None = None,
     ) -> None:
         self.response = response
         self.animation_response = animation_response
+        self.video_response = video_response
         self.render_requests: list[RenderRequest] = []
         self.render_to_file_calls: list[tuple[RenderRequest, Path | None]] = []
+        self.render_video_calls: list[VideoRenderRequest] = []
+        self.render_video_to_file_calls: list[
+            tuple[VideoRenderRequest, Path | None]
+        ] = []
         self.render_animation_to_file_calls: list[
             tuple[RenderRequest, Path | None, str, str, int, int, int, bool, int]
         ] = []
@@ -135,6 +170,30 @@ class RecordingRenderService:
             raise AssertionError("animation_response was not configured for this test.")
         return self.animation_response
 
+    def render_video(self, request: VideoRenderRequest) -> VideoRenderResponse:
+        self.render_video_calls.append(request)
+        if self.video_response is None:
+            raise AssertionError("video_response was not configured for this test.")
+        return self.video_response
+
+    def render_video_to_file(
+        self,
+        request: VideoRenderRequest,
+        output_file: Path | None = None,
+    ) -> VideoRenderResponse:
+        self.render_video_to_file_calls.append((request, output_file))
+        if self.video_response is None:
+            raise AssertionError("video_response was not configured for this test.")
+        if output_file is None:
+            return self.video_response
+        return VideoRenderResponse(
+            result=self.video_response.result,
+            video_file=self.video_response.video_file,
+            sampled_frame_indices=self.video_response.sampled_frame_indices,
+            total_video_frames=self.video_response.total_video_frames,
+            output_file=output_file,
+        )
+
 
 def test_render_to_file_defaults_to_out_folder_when_output_is_omitted(
     tmp_path: Path,
@@ -158,6 +217,100 @@ def test_render_to_file_defaults_to_out_folder_when_output_is_omitted(
     assert response.output_file is not None
     assert response.output_file.parent == tmp_path / "out"
     assert response.output_file.suffix == ".png"
+    assert response.output_file.name.endswith("-timeslice.png")
+
+
+def test_video_frame_indices_are_evenly_sampled() -> None:
+    assert select_video_frame_indices(
+        total_frames=10,
+        spec=VideoFrameSelectionSpec(target_frame_count=4),
+    ) == [0, 3, 6, 9]
+
+
+def test_render_video_samples_frames_and_remains_pure(tmp_path: Path) -> None:
+    video_file = tmp_path / "source.mp4"
+    video_file.write_bytes(b"not a real video; loader is test double")
+    frames = {
+        0: _solid_frame(0, width=4, height=2),
+        3: _solid_frame(120, width=4, height=2),
+        6: _solid_frame(240, width=4, height=2),
+    }
+    video_loader = RecordingVideoLoader(total_frames=7, frames=frames)
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=[], images=[]),
+        image_writer=writer,
+        video_frame_loader=video_loader,
+    )
+
+    response = service.render_video(
+        VideoRenderRequest(
+            video_file=video_file,
+            spec=TimesliceSpec(num_slices=3),
+        )
+    )
+
+    assert response.video_file == video_file
+    assert response.sampled_frame_indices == [0, 3, 6]
+    assert response.total_video_frames == 7
+    assert response.output_file is None
+    assert video_loader.load_frames_calls == [(video_file, [0, 3, 6], "crop")]
+    assert writer.saved_images == []
+
+
+def test_render_video_to_file_writes_explicit_output(tmp_path: Path) -> None:
+    video_file = tmp_path / "source.mp4"
+    video_file.write_bytes(b"not a real video; loader is test double")
+    output_file = tmp_path / "out" / "video-timeslice.png"
+    frames = {
+        0: _solid_frame(0, width=4, height=2),
+        1: _solid_frame(120, width=4, height=2),
+    }
+    writer = RecordingWriter()
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=[], images=[]),
+        image_writer=writer,
+        video_frame_loader=RecordingVideoLoader(total_frames=2, frames=frames),
+    )
+
+    response = service.render_video_to_file(
+        VideoRenderRequest(
+            video_file=video_file,
+            spec=TimesliceSpec(num_slices=2),
+        ),
+        output_file=output_file,
+    )
+
+    assert response.output_file == output_file
+    assert len(writer.saved_images) == 1
+    assert writer.saved_images[0][1] == output_file
+
+
+def test_render_video_to_file_defaults_to_video_sibling_out_folder(
+    tmp_path: Path,
+) -> None:
+    video_file = tmp_path / "media" / "source.mp4"
+    video_file.parent.mkdir()
+    video_file.write_bytes(b"not a real video; loader is test double")
+    frames = {
+        0: _solid_frame(0, width=4, height=2),
+        1: _solid_frame(120, width=4, height=2),
+    }
+    service = RenderTimesliceService(
+        sequence_loader=RecordingLoader(paths=[], images=[]),
+        image_writer=RecordingWriter(),
+        video_frame_loader=RecordingVideoLoader(total_frames=2, frames=frames),
+    )
+
+    response = service.render_video_to_file(
+        VideoRenderRequest(
+            video_file=video_file,
+            spec=TimesliceSpec(num_slices=2),
+        )
+    )
+
+    assert response.output_file is not None
+    assert response.output_file.parent == video_file.parent / "out"
     assert response.output_file.name.endswith("-timeslice.png")
 
 
@@ -906,6 +1059,24 @@ def test_cli_random_gif_output_file_is_optional() -> None:
     assert args.output_file is None
     assert args.random_gif is True
     assert args.random_gif_frames == 6
+
+
+def test_cli_parses_video_input_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "source.mp4",
+            "out/timeslice.png",
+            "--video",
+            "--video-frames",
+            "12",
+        ]
+    )
+
+    assert args.input_folder == Path("source.mp4")
+    assert args.output_file == Path("out/timeslice.png")
+    assert args.video is True
+    assert args.video_frames == 12
 
 
 def test_cli_output_file_is_optional_for_progression_video() -> None:

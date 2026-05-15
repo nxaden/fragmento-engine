@@ -22,6 +22,8 @@ from pytimeslice.application.services import (
     RenderRequest,
     RenderResponse,
     RenderTimesliceService,
+    VideoRenderRequest,
+    VideoRenderResponse,
 )
 from pytimeslice.domain.compositor import apply_timeslice_plan
 from pytimeslice.domain.models import (
@@ -37,6 +39,7 @@ from pytimeslice.domain.models import (
     SliceEffects,
     TimeslicePlan,
     TimesliceSpec,
+    VideoFrameSelectionSpec,
 )
 from pytimeslice.domain.planner import build_layout_plan, build_slot_map
 from pytimeslice.infrastructure.image_loader import (
@@ -45,6 +48,7 @@ from pytimeslice.infrastructure.image_loader import (
     normalize_rgb_image,
 )
 from pytimeslice.infrastructure.image_writer import PILImageWriter
+from pytimeslice.infrastructure.video_loader import FFmpegVideoFrameLoader
 from pytimeslice.shared.types import ResizeMode
 
 DEFAULT_CANVAS_WIDTH = 3840
@@ -57,6 +61,7 @@ def create_render_service() -> RenderTimesliceService:
     return RenderTimesliceService(
         sequence_loader=PILImageSequenceLoader(),
         image_writer=PILImageWriter(),
+        video_frame_loader=FFmpegVideoFrameLoader(),
     )
 
 
@@ -1163,6 +1168,53 @@ def render_folder_to_file(
     )
 
     return service.render_to_file(request=request, output_file=output_file)
+
+
+def render_video(
+    video_file: Path,
+    spec: TimesliceSpec | None = None,
+    frame_selection: VideoFrameSelectionSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+) -> VideoRenderResponse:
+    """Render a timeslice from evenly sampled video frames without writing a file."""
+    if spec is None:
+        spec = TimesliceSpec()
+    if frame_selection is None:
+        frame_selection = VideoFrameSelectionSpec()
+
+    service = create_render_service()
+    request = VideoRenderRequest(
+        video_file=video_file,
+        spec=spec,
+        frame_selection=frame_selection,
+        resize_mode=resize_mode,
+    )
+
+    return service.render_video(request=request)
+
+
+def render_video_to_file(
+    video_file: Path,
+    output_file: Path | None = None,
+    spec: TimesliceSpec | None = None,
+    frame_selection: VideoFrameSelectionSpec | None = None,
+    resize_mode: ResizeMode = "crop",
+) -> VideoRenderResponse:
+    """Render a timeslice from a video and save it to disk explicitly."""
+    if spec is None:
+        spec = TimesliceSpec()
+    if frame_selection is None:
+        frame_selection = VideoFrameSelectionSpec()
+
+    service = create_render_service()
+    request = VideoRenderRequest(
+        video_file=video_file,
+        spec=spec,
+        frame_selection=frame_selection,
+        resize_mode=resize_mode,
+    )
+
+    return service.render_video_to_file(request=request, output_file=output_file)
 
 
 def render_progression_gif(

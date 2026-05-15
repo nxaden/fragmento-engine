@@ -135,6 +135,19 @@ class TimesliceSpec:
     layout_slot_map: npt.ArrayLike | None = None
 
 
+@dataclass(frozen=True)
+class VideoFrameSelectionSpec:
+    """Video frame sampling intent before timeslice compositing.
+
+    `target_frame_count` controls how many evenly spaced frames are extracted.
+    When omitted, application workflows choose a reasonable count from the
+    render spec and video metadata.
+    """
+
+    target_frame_count: int | None = None
+    include_last: bool = True
+
+
 def validate_timeslice_spec(spec: TimesliceSpec) -> None:
     if spec.layout not in _VALID_LAYOUTS:
         raise ValueError(
@@ -171,6 +184,37 @@ def validate_timeslice_spec(spec: TimesliceSpec) -> None:
         raise ValueError("layout_slot_map can only be used when layout='slot_map'.")
     if spec.effects is not None:
         validate_slice_effects(spec.effects)
+
+
+def validate_video_frame_selection_spec(spec: VideoFrameSelectionSpec) -> None:
+    if spec.target_frame_count is not None and spec.target_frame_count < 1:
+        raise ValueError("target_frame_count must be at least 1.")
+
+
+def select_video_frame_indices(
+    *,
+    total_frames: int,
+    spec: VideoFrameSelectionSpec,
+) -> list[int]:
+    """Return evenly spaced source frame indices for a video input."""
+    validate_video_frame_selection_spec(spec)
+
+    if total_frames < 1:
+        raise ValueError("total_frames must be at least 1.")
+
+    target_frame_count = (
+        spec.target_frame_count
+        if spec.target_frame_count is not None
+        else min(total_frames, 24)
+    )
+    sample_count = min(target_frame_count, total_frames)
+
+    if sample_count == 1:
+        return [0 if not spec.include_last else total_frames - 1]
+
+    stop = total_frames - 1 if spec.include_last else total_frames
+    indices = np.linspace(0, stop, sample_count, endpoint=spec.include_last)
+    return np.rint(indices).astype(np.int_).tolist()
 
 
 @dataclass(frozen=True)

@@ -17,8 +17,9 @@ from pytimeslice import (
     render_animation,
     render_assigned_paths,
     render_folder_to_file,
+    render_video_to_file,
 )
-from pytimeslice import SliceEffects, TimesliceSpec
+from pytimeslice import SliceEffects, TimesliceSpec, VideoFrameSelectionSpec
 from pytimeslice.app import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from pytimeslice.domain.models import validate_timeslice_spec
 from pytimeslice.infrastructure.image_writer import PILImageWriter
@@ -421,7 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "Folder of source frames for standard rendering. In manual "
+            "Folder of source frames for standard rendering, or a video file "
+            "when --video is used. In manual "
             "assignment mode, omit this and pass only the output path."
         ),
     )
@@ -523,6 +525,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--resize-mode",
         choices=["crop", "resize"],
         default="crop",
+    )
+    parser.add_argument(
+        "--video",
+        action="store_true",
+        help="Treat input_folder as a video file and sample frames from it.",
+    )
+    parser.add_argument(
+        "--video-frames",
+        type=_parse_positive_int,
+        default=None,
+        metavar="COUNT",
+        help=(
+            "Number of evenly spaced video frames to sample. Defaults to "
+            "--slices, --random-blocks, or 24 frames."
+        ),
     )
     parser.add_argument(
         "--progression-gif",
@@ -734,6 +751,28 @@ def main() -> None:
 
     if args.input_folder is None:
         parser.error("input_folder is required unless manual assignment mode is used.")
+    if args.video and _animation_requested(args):
+        parser.error("Animation export is not supported with --video input.")
+    if args.video:
+        video_response = render_video_to_file(
+            video_file=args.input_folder,
+            output_file=args.output_file,
+            spec=spec,
+            frame_selection=VideoFrameSelectionSpec(
+                target_frame_count=args.video_frames,
+            ),
+            resize_mode=args.resize_mode,
+        )
+        print(
+            "Rendered using "
+            f"{len(video_response.sampled_frame_indices)} sampled video frames."
+        )
+        print(f"Video frames: {video_response.sampled_frame_indices}")
+        print(f"Saved: {video_response.output_file}")
+        return
+    if args.video_frames is not None:
+        parser.error("--video-frames can only be used with --video.")
+
     animation_options = _resolve_animation_options(args, parser)
     if animation_options is not None:
         if animation_options.mode == "progression" and spec.layout == "random":

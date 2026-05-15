@@ -31,6 +31,9 @@ def test_manual_assignment_helpers_are_exposed() -> None:
     assert pytimeslice.render_random_gif is not None
     assert pytimeslice.render_progression_video is not None
     assert pytimeslice.render_random_video is not None
+    assert pytimeslice.render_video is not None
+    assert pytimeslice.render_video_to_file is not None
     assert pytimeslice.serialize_layout is not None
     assert pytimeslice.swap_slots is not None
     assert pytimeslice.validate_slot_map is not None
+    assert pytimeslice.VideoFrameSelectionSpec is not None

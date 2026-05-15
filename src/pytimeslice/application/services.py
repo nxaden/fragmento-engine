@@ -15,7 +15,10 @@ from pytimeslice.domain.models import (
     RGBImage,
     TimeslicePlan,
     TimesliceSpec,
+    VideoFrameSelectionSpec,
+    select_video_frame_indices,
     validate_timeslice_spec,
+    validate_video_frame_selection_spec,
 )
 from pytimeslice.shared.types import ResizeMode
 
@@ -127,6 +130,23 @@ class ImageWriter(Protocol):
         ...
 
 
+class VideoFrameLoader(Protocol):
+    """Application layer contract for sampling RGB frames from a video."""
+
+    def count_frames(self, video_file: Path) -> int:
+        """Return the number of decodable frames in the video."""
+        ...
+
+    def load_frames(
+        self,
+        video_file: Path,
+        frame_indices: Sequence[int],
+        resize_mode: ResizeMode = "crop",
+    ) -> list[RGBImage]:
+        """Load selected video frames into normalized RGB arrays."""
+        ...
+
+
 @dataclass(frozen=True)
 class RenderRequest:
     """Input payload for a timeslice render workflow.
@@ -145,6 +165,16 @@ class RenderRequest:
 
 
 @dataclass(frozen=True)
+class VideoRenderRequest:
+    """Input payload for a timeslice render workflow from a video file."""
+
+    video_file: Path
+    spec: TimesliceSpec
+    frame_selection: VideoFrameSelectionSpec = VideoFrameSelectionSpec()
+    resize_mode: ResizeMode = "crop"
+
+
+@dataclass(frozen=True)
 class RenderResponse:
     """Output payload for a completed render workflow.
 
@@ -156,6 +186,17 @@ class RenderResponse:
 
     result: CompositeResult
     input_paths: list[Path]
+    output_file: Path | None = None
+
+
+@dataclass(frozen=True)
+class VideoRenderResponse:
+    """Output payload for a completed video-input render workflow."""
+
+    result: CompositeResult
+    video_file: Path
+    sampled_frame_indices: list[int]
+    total_video_frames: int
     output_file: Path | None = None
 
 
@@ -347,6 +388,25 @@ def _resolve_output_file(
     return output_file
 
 
+def _resolve_video_output_file(
+    video_file: Path,
+    output_file: Path | None,
+    *,
+    suffix: str,
+    label: str,
+) -> Path:
+    if output_file is None:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        token = secrets.token_hex(4)
+        filename = f"{stamp}-{token}-{label}{suffix}"
+        return video_file.parent / "out" / filename
+
+    if output_file.suffix == "":
+        return output_file.with_suffix(suffix)
+
+    return output_file
+
+
 def _resolve_animation_output_file(
     input_folder: Path,
     output_file: Path | None,
@@ -474,6 +534,7 @@ class RenderTimesliceService:
         self,
         sequence_loader: ImageSequenceLoader,
         image_writer: ImageWriter | None = None,
+        video_frame_loader: VideoFrameLoader | None = None,
     ) -> None:
         """Initialize the render service.
 
@@ -485,9 +546,65 @@ class RenderTimesliceService:
         """
         self._sequence_loader = sequence_loader
         self._image_writer = image_writer
+        self._video_frame_loader = video_frame_loader
 
     def _validate_request(self, request: RenderRequest) -> None:
         validate_timeslice_spec(request.spec)
+
+    def _validate_video_request(self, request: VideoRenderRequest) -> None:
+        validate_timeslice_spec(request.spec)
+        validate_video_frame_selection_spec(request.frame_selection)
+
+    def _resolve_video_frame_selection(
+        self,
+        request: VideoRenderRequest,
+        *,
+        total_frames: int,
+    ) -> VideoFrameSelectionSpec:
+        if request.frame_selection.target_frame_count is not None:
+            return request.frame_selection
+
+        default_count: int | None
+        if request.spec.layout == "random":
+            default_count = request.spec.num_blocks if request.spec.num_blocks else 4
+        else:
+            default_count = request.spec.num_slices
+
+        return VideoFrameSelectionSpec(
+            target_frame_count=(
+                default_count if default_count is not None else min(total_frames, 24)
+            ),
+            include_last=request.frame_selection.include_last,
+        )
+
+    def _load_video_images(
+        self,
+        request: VideoRenderRequest,
+    ) -> tuple[int, list[int], list[RGBImage]]:
+        if self._video_frame_loader is None:
+            raise ValueError("No video frame loader was configured for this service.")
+        if not request.video_file.exists():
+            raise ValueError(f"Video file does not exist: {request.video_file}")
+        if not request.video_file.is_file():
+            raise ValueError(f"Video path is not a file: {request.video_file}")
+
+        self._validate_video_request(request)
+
+        total_frames = self._video_frame_loader.count_frames(request.video_file)
+        selection = self._resolve_video_frame_selection(
+            request,
+            total_frames=total_frames,
+        )
+        frame_indices = select_video_frame_indices(
+            total_frames=total_frames,
+            spec=selection,
+        )
+        images = self._video_frame_loader.load_frames(
+            request.video_file,
+            frame_indices,
+            resize_mode=request.resize_mode,
+        )
+        return total_frames, frame_indices, images
 
     def _load_paths_and_images(
         self,
@@ -572,6 +689,47 @@ class RenderTimesliceService:
         return RenderResponse(
             result=response.result,
             input_paths=response.input_paths,
+            output_file=resolved_output,
+        )
+
+    def render_video(self, request: VideoRenderRequest) -> VideoRenderResponse:
+        """Render a timeslice composite from selected frames in a video file."""
+        total_frames, frame_indices, images = self._load_video_images(request)
+        result = build_timeslice(
+            images=images,
+            spec=request.spec,
+        )
+
+        return VideoRenderResponse(
+            result=result,
+            video_file=request.video_file,
+            sampled_frame_indices=frame_indices,
+            total_video_frames=total_frames,
+        )
+
+    def render_video_to_file(
+        self,
+        request: VideoRenderRequest,
+        output_file: Path | None = None,
+    ) -> VideoRenderResponse:
+        """Render a video-input timeslice composite and save it to disk."""
+        if self._image_writer is None:
+            raise ValueError("No image writer configured for this service.")
+
+        response = self.render_video(request)
+        resolved_output = _resolve_video_output_file(
+            request.video_file,
+            output_file,
+            suffix=".png",
+            label="timeslice",
+        )
+        self._image_writer.save(response.result.image, resolved_output)
+
+        return VideoRenderResponse(
+            result=response.result,
+            video_file=response.video_file,
+            sampled_frame_indices=response.sampled_frame_indices,
+            total_video_frames=response.total_video_frames,
             output_file=resolved_output,
         )
 

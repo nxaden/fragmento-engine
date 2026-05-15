@@ -1,12 +1,13 @@
 # pytimeslice
 
 `pytimeslice` is a Python library for building time-slice composite images from
-ordered frame sequences.
+ordered frame sequences or sampled video frames.
 
 It is structured as a reusable engine first:
 
 - pure in-memory rendering APIs
 - explicit still-image export workflows
+- video-frame sampling workflows backed by ffmpeg
 - progression GIF generation
 - a thin CLI on top of the library
 
@@ -16,7 +17,7 @@ It is structured as a reusable engine first:
 - vertical and horizontal slice layouts
 - slice boundary effects such as borders, shadows, highlights, feathering, and
   curve shaping
-- file-based rendering workflows for folders of images
+- file-based rendering workflows for folders of images and videos
 - typed Python APIs that can be used directly from your own code
 
 ## Where To Start

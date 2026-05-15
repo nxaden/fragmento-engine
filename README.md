@@ -9,7 +9,7 @@
 
 ## Features
 
-- Render composite timeslice images from ordered image sequences
+- Render composite timeslice images from ordered image sequences or sampled video frames
 - Choose vertical or horizontal slicing, slice count, and time direction
 - Use mask-based layouts such as diagonal, spiral, circular, random block grids, or user-defined pixel-order masks
 - Normalize source frames by resizing, cropping, or fitting them to a common size
@@ -106,6 +106,25 @@ saved = render_folder_to_file(
 )
 
 print(saved.output_file)
+```
+
+To render from a video, install `ffmpeg`/`ffprobe` on your PATH and use the
+video APIs. Frames are sampled evenly across the video; by default the sample
+count follows `spec.num_slices`, `spec.num_blocks`, or falls back to 24 frames.
+
+```python
+from pathlib import Path
+
+from pytimeslice import TimesliceSpec, VideoFrameSelectionSpec, render_video_to_file
+
+saved = render_video_to_file(
+    video_file=Path("./clip.mp4"),
+    output_file=Path("./out/video-timeslice.png"),
+    spec=TimesliceSpec(num_slices=20),
+    frame_selection=VideoFrameSelectionSpec(target_frame_count=20),
+)
+
+print(saved.sampled_frame_indices)
 ```
 
 To render an animation export through the unified API:
@@ -328,10 +347,15 @@ geometry once and then keep filling slots against that stable slot map.
 ## CLI Usage
 
 A CLI interface is provided on top of the engine so a folder of source
-frames can be rendered directly from the command line.
+frames, or sampled frames from a video, can be rendered directly from the
+command line.
 
 ```sh
 pytimeslice ./frames --orientation vertical --slices 20
+```
+
+```sh
+pytimeslice ./clip.mp4 ./out/video-timeslice.png --video --slices 20
 ```
 
 If no output path is provided, `pytimeslice` writes a timestamped file into an

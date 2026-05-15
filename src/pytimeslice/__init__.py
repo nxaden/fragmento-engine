@@ -26,6 +26,8 @@ from pytimeslice.app import (
     render_progression_video,
     render_random_gif,
     render_random_video,
+    render_video,
+    render_video_to_file,
     serialize_layout,
     swap_slots,
     validate_slot_map,
@@ -37,6 +39,7 @@ from pytimeslice.domain.models import (
     LayoutSlot,
     SliceEffects,
     TimesliceSpec,
+    VideoFrameSelectionSpec,
 )
 
 try:
@@ -73,9 +76,12 @@ __all__ = [
     "render_progression_video",
     "render_random_gif",
     "render_random_video",
+    "render_video",
+    "render_video_to_file",
     "serialize_layout",
     "SliceEffects",
     "swap_slots",
     "TimesliceSpec",
     "validate_slot_map",
+    "VideoFrameSelectionSpec",
 ]
